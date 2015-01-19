@@ -1,9 +1,59 @@
+# gedit backup files
+*~
+
+# vim swap files
+*.swp
+*.bak
+
+# experiments
+expr/*
+
+
+# Don't track the image files:
+*.png
+*.jpg
+
+# Don't track the binary data files:
+*.npy
+*.pkl
+*.pickle
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*.pyc  # python files
 
-# C extensions
+# C ignore files:
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+# Precompiled Headers
+*.gch
+*.pch
+# Libraries
+*.lib
+*.a
+*.la
+*.lai
+*.lo
+*.slo
+# Shared objects
+*.dll
 *.so
+*.so.*
+*.dylib
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Fortran module files
+*.mod
 
 # Distribution / packaging
 .Python
