@@ -1,4 +1,5 @@
 import copy
+import time
 import numpy
 import numpy.random
 import theano
@@ -90,10 +91,6 @@ class GraddescentMinibatch(object):
         self.get_step_info = theano.function([], (norm_inc_vector, angle_rad))
 
     def set_learningrate(self, learningrate):
-        """
-        TODO: set_learningrate() is not known to be working after 
-        initialization. Not checked. A unit test should be written on it.
-        """
         self.learningrate  = learningrate
         self.inc_updates = []  # updates the parameter increasements (i.e. 
                                # value in the self.incs dictionary.). Due to 
@@ -137,13 +134,15 @@ class GraddescentMinibatch(object):
                 }
             )
 
-        self.n = T.scalar('n')
-        self.noop = 0.0 * self.n
-        self._trainmodel = theano.function([self.n], self.noop, 
-                                           updates = self.updates)
+        #self.n = T.scalar('n')
+        #self.noop = 0.0 * self.n
+        #self._trainmodel = theano.function([self.n], self.noop, 
+        #                                   updates = self.updates)
+        self._trainmodel = theano.function(inputs=[], updates = self.updates)
             
 
     def step(self):
+        start = time.time()
         stepcount = 0.0
         cost = 0.
         self.ref_vector.set_value(self.get_params_value())
@@ -155,14 +154,15 @@ class GraddescentMinibatch(object):
             cost = (1.0 - 1.0/stepcount) * cost + \
                    (1.0/stepcount) * self._updateincs(batch_index)
             
-            self._trainmodel(0)
+            self._trainmodel()
 
         norm, angle_rad = self.get_step_info()
         self.epochcount += 1
+        stop = time.time()
         if self.verbose:
-            print 'epoch: %d, lr: %f, cost: %f, update: norm: %f, angle(RAD): %f' % (
-                self.epochcount, self.learningrate, cost, norm, angle_rad
-            )
+            print 'epoch %d: %.2fs, lr %f cost %f, ' % (
+                self.epochcount, (stop - start), self.learningrate, cost) + \
+                  'update norm %f angle(RAD) %.3f' % (norm, angle_rad)
 
         return cost
 
@@ -303,7 +303,8 @@ class FeedbackAlignment(object):
     def __init__(self, model, data, truth_data, 
                  batchsize=100, learningrate=0.1, rng=None, verbose=True):
         """
-        It works for both linear and nonlinear layers.
+        It works for both linear and nonlinear layers, as long as they have 
+        the activ_prime() method.
 
         Cost is defined intrinsicaly as the MSE between target y vector and 
         real y vector at the top layer.
@@ -311,10 +312,11 @@ class FeedbackAlignment(object):
         Parameters:
         ------------
         model : StackedLayer
-
         data : theano.compile.SharedVariable
-
         truth_data : theano.compile.SharedVariable
+
+        Notes:
+        ------------
         """
         if (not isinstance(data, SharedCPU)) and \
            (not isinstance(data, SharedGPU)):
@@ -441,21 +443,11 @@ class Dropout(object):
         def __init__(self, n_in, droprate, varin=None, theano_rng=None):
             super(Dropout.DropoutLayer, self).__init__(n_in, n_in, varin=varin)
             self.droprate = droprate
-            """
-            theano.shared(
-                value=numpy.asarray(droprate, dtype=theano.config.floatX),
-                name='droprate',
-                borrow=True
-            )
-            """
 
             if not theano_rng:
                 theano_rng = RandomStreams(123)
             assert isinstance(theano_rng, T.shared_randomstreams.RandomStreams)
             self.theano_rng = theano_rng
-
-        # def set_droprate(self, new_droprate):
-        #     self.droprate.set_value(new_droprate)
 
         def output(self):
             return self.theano_rng.binomial(size=self.varin.shape, n=1,
@@ -504,27 +496,6 @@ class Dropout(object):
                     theano_rng=self.theano_rng
                 ) + self.model.decoder()
             self.dropout_model.decoder = dropout_decoder
-
-            """
-            self.dropout_model = self.DropoutLayer(
-                n_in=self.model.n_in,
-                droprate=self.droprates[0],
-                theano_rng=self.theano_rng
-            ) + self.model.encoder() + self.DropoutLayer(
-                n_in=self.model.n_hid,
-                droprate=self.droprates[1],
-                theano_rng=self.theano_rng
-            ) + self.model.decoder()
-        
-            x = self.dropout_model.varin
-            x_head = self.dropout_model.output()
-            if self.model.vistype == 'binary':
-                cost_per_case = - T.sum(x * T.log(x_head) + \
-                (1 - x) * T.log(1 - x_head), axis=1)
-            elif self.model.vistype == 'real':
-                cost_per_case = T.sum((x - x_head) ** 2, axis=1)
-            self.dropout_model.cost = T.mean(cost_per_case)
-            """
 
         elif isinstance(self.model, StackedLayer):
             # TODO: more thing to do for assertion here. Not sure if it will

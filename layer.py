@@ -33,6 +33,8 @@ class Layer(object):
 
         self.params = []  # to be implemented by subclass
 
+        self.patch_ind = numpy.asarray([])  # needed by plotting.
+
     def fanin(self):
         raise NotImplementedError("Must be implemented by subclass.")
 
@@ -72,7 +74,7 @@ class Layer(object):
 
     # Following are for analysis ----------------------------------------------
 
-    def draw_weight(self, verbose=True, filename='default_draw_layerw.png'):
+    def display_weight(self, verbose=True, filename='default_display_layerw.png'):
         """
         Parameters
         -----------
@@ -107,41 +109,122 @@ class Layer(object):
         self._fig_weight.canvas.draw()
         
         if verbose:
-            plt.pause(0.0001)
+            plt.pause(0.05)
         else:
             plt.savefig(filename)
 
-"""
-    def dispims_color(M, border=0, bordercolor=[0.0, 0.0, 0.0], *imshow_args, **imshow_keyargs):
-    i   """"""" Display an array of rgb images. 
+    def draw_weight(self, patch_shape, map_function=None, npatch=None,
+                    border=1, bordercolor=(0.0, 0.0, 0.0),
+                    verbose=True, filename='default_draw_layerw.png',
+                    *imshow_args, **imshow_keyargs):
+        """
+        Adapted from Roland Memisevic's code.
+        Display an array of rgb images. 
+        
+        Parameters
+        -----------
+        patch_shape : tuple of integers, has to contain 3 entries.
+            First and second entries for the size on X and Y direction, the
+            third entry for the number of channels. So the third entry has to
+            be 1 for grey image or 3 for RGB image.
+        map_function : theano.function
+            Maps the weight back through the preprocessing steps to get
+            resonable representations of the filters. It should take no inputs
+            and output the desired representation of weights.
+        npatch : int
 
-        The input array is assumed to have the shape numimages x numpixelsY x numpixelsX x 3
-        """"""
+        border : int
+            Size of the border.
+        bordercolor : a tuple of 3 entries.
+            Stands for the RGB value of border.
+        verbose : bool
+
+        filename : str
+
+
+        Returns
+        -----------
+        Notes
+        -----------
+        Map the weights into a resonable representation by applying it onto
+        a theano function 'map_function.' If not given, it displays weights
+        by directly reshaping it to the shape specified by patch_shape. The
+        weight array should finally be in the shape of:
+        self.n_out x patch_shape[0] x patch_shape[1] x patch_shape[2]
+
+        """
+        assert hasattr(self, 'w'), "The layer need to have weight defined."
+        if map_function == None:
+            M = self.w.get_value().T
+        else:
+            assert isinstance(
+                map_function,
+                theano.compile.function_module.Function
+            ), "map_function has to be a theano function with no input."
+            M = map_function()
+        if npatch == None:
+            npatch = self.n_out
+        else:
+            assert npatch <= self.n_out, "Too large npatch size."
+            if npatch != len(self.patch_ind):
+                if not hasattr(self, 'npy_rng'):
+                    self.npy_rng = numpy.random.RandomState(123)
+                self.patch_ind = self.npy_rng.permutation(self.n_out)[:npatch]
+            M = M[self.patch_ind, :]
+        try:
+            M = M.reshape((npatch, ) + patch_shape)
+        except:
+            raise ValueError("Wrong patch_shape.")
+        
         bordercolor = numpy.array(bordercolor)[None, None, :]
-        numimages = len(M)
         M = M.copy()
+
         for i in range(M.shape[0]):
             M[i] -= M[i].flatten().min()
             M[i] /= M[i].flatten().max()
-        height, width, three = M[0].shape
-        assert three == 3
-        n0 = numpy.int(numpy.ceil(numpy.sqrt(numimages)))
-        n1 = numpy.int(numpy.ceil(numpy.sqrt(numimages)))
-        im = numpy.array(bordercolor)*numpy.ones(
-                             ((height+border)*n1+border,(width+border)*n0+border, 1),dtype='<f8')
-        for i in range(n0):
-            for j in range(n1):
-                if i*n1+j < numimages:
-                    im[j*(height+border)+border:(j+1)*(height+border)+border,
-                    i*(width+border)+border:(i+1)*(width+border)+border,:] = numpy.concatenate((
-                    numpy.concatenate((M[i*n1+j,:,:,:],
-                         bordercolor*numpy.ones((height,border,3),dtype=float)), 1),
-                         bordercolor*numpy.ones((border,width+border,3),dtype=float)
+        height, width, channel = M[0].shape
+        if channel == 1:
+            M = numpy.tile(M.reshape(npatch, height, width, 1), (1, 1, 3))
+        elif channel != 3:
+            raise ValueError(
+                "3rd entry of patch_shape has to be either 1 or 3."
+            )
+        vpatches = numpy.int(numpy.ceil(numpy.sqrt(npatch)))
+        hpatches = numpy.int(numpy.ceil(numpy.sqrt(npatch)))
+        vstrike = width + border
+        hstrike = height + border
+        # initialize image size with border color
+        im = numpy.array(bordercolor) * numpy.ones((hstrike * hpatches + border,
+                                                    vstrike * vpatches + border,
+                                                    1), dtype='<f8')
+        for i in range(vpatches):
+            for j in range(hpatches):
+                if i * hpatches + j < npatch:
+                    im[j * hstrike + border:(j+1) * hstrike + border,
+                       i * vstrike + border:(i+1) * vstrike + border,
+                       :] = numpy.concatenate((
+                        numpy.concatenate(
+                            (M[i * hpatches + j, :, :, :],
+                             bordercolor * numpy.ones(
+                             (height, border, 3), dtype=float)),
+                            1),
+                        bordercolor * numpy.ones((border, vstrike, 3),
+                                                 dtype=float)
                     ), 0)
-        imshow_keyargs["interpolation"]="nearest"
-        pylab.imshow(im, *imshow_args, **imshow_keyargs)
-        pylab.show()
-"""
+        
+        if not hasattr(self, '_weight_img'):
+            imshow_keyargs["interpolation"]="nearest"
+            self._weight_img = plt.figure()
+            self.ax = self._weight_img.add_subplot(111)
+            self.wimg = self.ax.imshow(im, *imshow_args, **imshow_keyargs)
+        else:
+            self.wimg.set_data(im)
+        self._weight_img.canvas.draw()
+
+        if verbose:
+            plt.pause(0.05)
+        else:
+            plt.savefig(filename)
 
 
 class StackedLayer(Layer):

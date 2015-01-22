@@ -138,8 +138,61 @@ class Perceptron(Classifier):
 
 
 class LinearRegression(Classifier):
-    def __init__(self):
-        #
-        # TODO:
-        #
-        pass
+    def __init__(self, n_in, n_out, varin=None, vartruth=None, 
+                 init_w=None, init_b=None, npy_rng=None):
+        super(LinearRegression, self).__init__(
+            n_in, n_out, varin=varin, vartruth=vartruth
+        )
+
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
+
+        if not init_w:
+            w = numpy.asarray(npy_rng.uniform(
+                low = -4 * numpy.sqrt(6. / (n_in + n_out)),
+                high = 4 * numpy.sqrt(6. / (n_in + n_out)),
+                size=(n_in, n_out)), dtype=theano.config.floatX)
+            init_w = theano.shared(value=w, name='w_sigmoid', borrow=True)
+        # else:
+        #     TODO. The following assetion is complaining about an attribute
+        #     error while passing w.T to init_w. Considering using a more
+        #     robust way of assertion in the future.
+        #     assert init_w.get_value().shape == (n_in, n_out)
+        self.w = init_w
+
+        if not init_b:
+            init_b = theano.shared(value=numpy.zeros(
+                                       n_out,
+                                       dtype=theano.config.floatX),
+                                   name='b_sigmoid', borrow=True)
+        else:
+            assert init_b.get_value().shape == (n_out,)
+        self.b = init_b
+
+        self.params = [self.w, self.b]
+
+    def fanin(self):
+        return T.dot(self.varin, self.w) + self.b
+
+    def output(self):
+        return self.fanin()
+
+    def activ_prime(self):
+        """for the special relationship between LinearRegression and LinearLayer, we can
+        define this method in this classifier."""
+        return LinearLayer(
+            self.n_in, self.n_out, varin=self.varin,
+            init_w=self.w, init_b=self.b
+        ).activ_prime()
+
+    def cost(self):
+        # TODO not known
+        return str("ERROR")
+    
+    def weightdecay(self, weightdecay=1e-3):
+        return weightdecay * (self.w**2).sum()
+
+    def predict(self):
+        return T.argmax(self.output(), axis=1)

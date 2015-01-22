@@ -10,7 +10,7 @@ import theano.tensor as T
 import matplotlib
 # matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from layer import Layer, SigmoidLayer, LinearLayer,ZerobiasLayer
+from layer import Layer, SigmoidLayer, LinearLayer, ZerobiasLayer
 
 
 class Model(Layer):
