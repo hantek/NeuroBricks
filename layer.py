@@ -150,8 +150,10 @@ class Layer(object):
         a theano function 'map_function.' If not given, it displays weights
         by directly reshaping it to the shape specified by patch_shape. The
         weight array should finally be in the shape of:
-        self.n_out x patch_shape[0] x patch_shape[1] x patch_shape[2]
+        npatch x patch_shape[0] x patch_shape[1] x patch_shape[2]
 
+        Here we assume that the map_fun, or the input to the layer if map_fun
+        is not provided, are placed in the order of [RRRRGGGGBBBB].
         """
         assert hasattr(self, 'w'), "The layer need to have weight defined."
         if map_function == None:
@@ -171,10 +173,6 @@ class Layer(object):
                     self.npy_rng = numpy.random.RandomState(123)
                 self.patch_ind = self.npy_rng.permutation(self.n_out)[:npatch]
             M = M[self.patch_ind, :]
-        try:
-            M = M.reshape((npatch, ) + patch_shape)
-        except:
-            raise ValueError("Wrong patch_shape.")
         
         bordercolor = numpy.array(bordercolor)[None, None, :]
         M = M.copy()
@@ -182,13 +180,18 @@ class Layer(object):
         for i in range(M.shape[0]):
             M[i] -= M[i].flatten().min()
             M[i] /= M[i].flatten().max()
-        height, width, channel = M[0].shape
+        height, width, channel = patch_shape
         if channel == 1:
-            M = numpy.tile(M.reshape(npatch, height, width, 1), (1, 1, 3))
+            M = numpy.tile(M, 3)
         elif channel != 3:
             raise ValueError(
                 "3rd entry of patch_shape has to be either 1 or 3."
             )
+        try:
+            M = M.reshape((npatch, ) + patch_shape, order='F')
+        except:
+            raise ValueError("Wrong patch_shape.")
+        
         vpatches = numpy.int(numpy.ceil(numpy.sqrt(npatch)))
         hpatches = numpy.int(numpy.ceil(numpy.sqrt(npatch)))
         vstrike = width + border
