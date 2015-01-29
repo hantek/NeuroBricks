@@ -1,5 +1,5 @@
 """
-This file provides a general solutions for passing numerical values between mod-
+This file provides a genertic soluion for passing numerical values between mod-
 els and saving/loading parameters with files.
 
 TODO:
@@ -8,6 +8,7 @@ Deal with params_private problem.
 """
 import numpy
 import theano
+
 
 def set_params(model, newparams):
     def inplaceupdate(x, new):
@@ -31,3 +32,7 @@ def save_params(model, filename):
 
 def load_params(model, filename):
     set_params(model, numpy.load(filename))
+
+
+def dump_model(model, filename):
+    pass    

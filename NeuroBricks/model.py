@@ -12,6 +12,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from layer import Layer, SigmoidLayer, LinearLayer, ZerobiasLayer
 
+import pdb
 
 class Model(Layer):
     """
@@ -276,14 +277,20 @@ class ClassicalAutoencoder(AutoEncoder):
             )
 
     def contraction(self, contract_level=0.1):
+        """
+        We are computing the Jacobian, i.e. dh / dv, implicitly. The equivalent
+        explicit way is:
+            jacobian = dh.dimshuffle(0, 1, 'x') * self.w.dimshuffle('x', 1, 0)
+            contraction_per_case = T.sum(jacobian ** 2, axis=(1, 2))
+        This implementation is inspired by https://groups.google.com/forum/#!to-
+        pic/pylearn-dev/iY7swxgn-xI/discussion . It helps speeding up
+        computation and reducing memory usage dramatically.
+        """
         if self.hidtype == 'binary':
             dh = self.hidden() * (1 - self.hidden())  # sigmoid derivative
         elif self.hidtype == 'real':
-            dh = self.hidden()  # linear derivative
-        contraction_per_case = T.sum(
-            (dh.dimshuffle(0, 1, 'x') * self.w.dimshuffle('x', 1, 0)) ** 2,
-            axis=(1, 2)
-        )
+            dh = self.hidden()  # linear activation derivative
+        contraction_per_case = T.sum(T.dot(dh**2, self.w.T**2), axis=1)
         return contract_level * T.mean(contraction_per_case)
 
 

@@ -164,6 +164,7 @@ class Layer(object):
                 theano.compile.function_module.Function
             ), "map_function has to be a theano function with no input."
             M = map_function()
+        assert M.shape[0] == self.n_out, "Wrong M row numbers."
         if npatch == None:
             npatch = self.n_out
         else:
