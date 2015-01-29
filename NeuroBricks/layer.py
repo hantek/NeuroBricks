@@ -239,19 +239,7 @@ class Layer(object):
                         i * vstrike + border:i * vstrike + border + width,
                         :
                     ] = M[i * hpatches + j, :, :, :]
-                    """ 
-                    im[j * hstrike + border:(j+1) * hstrike + border,
-                       i * vstrike + border:(i+1) * vstrike + border,
-                       :] = numpy.concatenate((
-                        numpy.concatenate(
-                            (M[i * hpatches + j, :, :, :],
-                             bordercolor * numpy.ones(
-                             (height, border, 3), dtype=float)),
-                            1),
-                        bordercolor * numpy.ones((border, vstrike, 3),
-                                                 dtype=float)
-                    ), 0)
-                    """
+        
         if not hasattr(self, '_draw_weight'):
             imshow_keyargs["interpolation"]="nearest"
             self._draw_weight = plt.figure()
