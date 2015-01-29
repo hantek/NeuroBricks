@@ -74,7 +74,43 @@ class Layer(object):
 
     # Following are for analysis ----------------------------------------------
 
-    def display_weight(self, verbose=True, filename='default_display_layerw.png'):
+    def wTw(self, verbose=True, filename='default_wTw_layerw.png'):
+        assert hasattr(self, 'w'), "The layer need to have weight defined."
+        if not hasattr(self, '_wTw'):
+            self.get_w_cov = theano.function([], T.dot(self.w.T, self.w))
+            self._wTw = plt.figure()
+            self.wTw_ax = self._wTw.add_subplot(111)
+            plt.gray()
+            self.wTw_ip = self.wTw_ax.imshow(self.get_w_cov())
+        else:
+            self.wTw_ip.set_data(self.get_w_cov())
+        self._wTw.canvas.draw()
+        
+        if verbose:
+            plt.pause(0.05)
+        else:
+            plt.savefig(filename)
+
+    def naiveplot_weight(self, verbose=True, 
+                         filename='default_naiveplot_layerw.png'):
+        assert hasattr(self, 'w'), "The layer need to have weight defined."
+        if not hasattr(self, '_naiveplot_weight'):
+            if not hasattr(self, 'get_w'):
+                self.get_w = theano.function([], self.w.T.T)
+            self._naiveplot_weight = plt.figure()
+            self.naive_ax = self._naiveplot_weight.add_subplot(111)
+            plt.gray()
+            self.naive_ip = self.naive_ax.imshow(self.get_w())
+        else:
+            self.naive_ip.set_data(self.get_w())
+        self._naiveplot_weight.canvas.draw()
+        
+        if verbose:
+            plt.pause(0.05)
+        else:
+            plt.savefig(filename)
+
+    def hist_weight(self, verbose=True, filename='default_hist_layerw.png'):
         """
         Parameters
         -----------
@@ -87,26 +123,18 @@ class Layer(object):
         -----------
         """
         assert hasattr(self, 'w'), "The layer need to have weight defined."
-        if not hasattr(self, '_fig_weight'):
-            self.get_w = theano.function([], self.w.T.T)
-            self.get_w_cov = theano.function([], T.dot(self.w.T, self.w))
-
-            self._fig_weight = plt.figure(figsize=(7, 11))
-            self.plt1 = self._fig_weight.add_subplot(311)
-            plt.gray()
-            self.p1 = self.plt1.imshow(self.get_w())
-            self.plt2 = self._fig_weight.add_subplot(312)
-            n, bins, patches = self.plt2.hist(self.get_w().flatten(), 50,
-                                              facecolor='blue')
-            self.plt3 = self._fig_weight.add_subplot(313)
-            self.p3 = self.plt3.imshow(self.get_w_cov())
+        if not hasattr(self, '_hist_weight'):
+            if not hasattr(self, 'get_w'):
+                self.get_w = theano.function([], self.w.T.T)
+            self._hist_weight = plt.figure()
+            self.hist_ax = self._hist_weight.add_subplot(111)
         else:
-            self.p1.set_data(self.get_w())
-            self.plt2.cla()
-            n, bins, patches = self.plt2.hist(self.get_w().flatten(), 50,
-                                              facecolor='blue')
-            self.p3.set_data(self.get_w_cov())
-        self._fig_weight.canvas.draw()
+            self.hist_ax.cla()
+
+        n, bins, patches = self.hist_ax.hist(
+            self.get_w().flatten(), 50, facecolor='blue'
+        )
+        self._hist_weight.canvas.draw()
         
         if verbose:
             plt.pause(0.05)
@@ -157,7 +185,9 @@ class Layer(object):
         """
         assert hasattr(self, 'w'), "The layer need to have weight defined."
         if map_function == None:
-            M = self.w.get_value().T
+            if not hasattr(self, 'get_w'):
+                self.get_w = theano.function([], self.w.T.T)
+            M = self.get_w().T
         else:
             assert isinstance(
                 map_function,
@@ -204,6 +234,12 @@ class Layer(object):
         for i in range(vpatches):
             for j in range(hpatches):
                 if i * hpatches + j < npatch:
+                    im[
+                        j * hstrike + border:j * hstrike + border + height,
+                        i * vstrike + border:i * vstrike + border + width,
+                        :
+                    ] = M[i * hpatches + j, :, :, :]
+                    """ 
                     im[j * hstrike + border:(j+1) * hstrike + border,
                        i * vstrike + border:(i+1) * vstrike + border,
                        :] = numpy.concatenate((
@@ -215,15 +251,15 @@ class Layer(object):
                         bordercolor * numpy.ones((border, vstrike, 3),
                                                  dtype=float)
                     ), 0)
-        
-        if not hasattr(self, '_weight_img'):
+                    """
+        if not hasattr(self, '_draw_weight'):
             imshow_keyargs["interpolation"]="nearest"
-            self._weight_img = plt.figure()
-            self.ax = self._weight_img.add_subplot(111)
-            self.wimg = self.ax.imshow(im, *imshow_args, **imshow_keyargs)
+            self._draw_weight = plt.figure()
+            self.draw_ax = self._draw_weight.add_subplot(111)
+            self.wimg = self.draw_ax.imshow(im, *imshow_args, **imshow_keyargs)
         else:
             self.wimg.set_data(im)
-        self._weight_img.canvas.draw()
+        self._draw_weight.canvas.draw()
 
         if verbose:
             plt.pause(0.05)
