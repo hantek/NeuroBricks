@@ -166,6 +166,9 @@ class GraddescentMinibatch(object):
 
         return cost
 
+    def draw_gradient(self,):
+        raise NotImplementedError("Not implemented yet...")
+
 
 class ConjugateGradient(object):
     def __init__(self, varin, data, cost, params, 

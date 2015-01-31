@@ -34,6 +34,7 @@ class Layer(object):
         self.params = []  # to be implemented by subclass
 
         self.patch_ind = numpy.asarray([])  # needed by plotting.
+        self.givens_activation = {}  # hist_activation() is going to need it.
 
     def fanin(self):
         raise NotImplementedError("Must be implemented by subclass.")
@@ -74,7 +75,7 @@ class Layer(object):
 
     # Following are for analysis ----------------------------------------------
 
-    def wTw(self, verbose=True, filename='default_wTw_layerw.png'):
+    def wTw(self, verbose=True, filename='wTw_layerw.png'):
         assert hasattr(self, 'w'), "The layer need to have weight defined."
         if not hasattr(self, '_wTw'):
             self.get_w_cov = theano.function([], T.dot(self.w.T, self.w))
@@ -92,7 +93,7 @@ class Layer(object):
             plt.savefig(filename)
 
     def naiveplot_weight(self, verbose=True, 
-                         filename='default_naiveplot_layerw.png'):
+                         filename='naiveplot_layerw.png'):
         assert hasattr(self, 'w'), "The layer need to have weight defined."
         if not hasattr(self, '_naiveplot_weight'):
             if not hasattr(self, 'get_w'):
@@ -110,7 +111,7 @@ class Layer(object):
         else:
             plt.savefig(filename)
 
-    def hist_weight(self, verbose=True, filename='default_hist_layerw.png'):
+    def hist_weight(self, verbose=True, filename='hist_layerw.png'):
         """
         Parameters
         -----------
@@ -143,7 +144,7 @@ class Layer(object):
 
     def draw_weight(self, patch_shape, map_function=None, npatch=None,
                     border=1, bordercolor=(0.0, 0.0, 0.0),
-                    verbose=True, filename='default_draw_layerw.png',
+                    verbose=True, filename='draw_layerw.png',
                     *imshow_args, **imshow_keyargs):
         """
         Adapted from Roland Memisevic's code.
@@ -256,7 +257,7 @@ class Layer(object):
         else:
             plt.savefig(filename)
 
-    def hist_bias(self, verbose=True, filename='default_hist_layerb.png'):
+    def hist_bias(self, verbose=True, filename='hist_layerb.png'):
         """
         Parameters
         -----------
@@ -287,6 +288,49 @@ class Layer(object):
         else:
             plt.savefig(filename)
 
+    def hist_activation(self, givens={}, verbose=True,
+                        filename='hist_activation.png'):
+        """
+        Parameters
+        -----------
+        givens : dict
+            Specify the inputs needed for computing the activation in this
+            layer. This will be passed to givens parameter while building
+            theano function. Changing this dictionary will result in
+            recompiling the function again.
+        verbose : bool
+        filename : string
+    
+
+        Returns
+        -----------
+        
+
+        Notes
+        -----------
+        
+        """
+        if not hasattr(self, '_hist_activation'):
+            if not hasattr(self, 'get_activation') or \
+            self.givens_activation != givens:
+                self.givens_activation = givens
+                self.get_activation = theano.function(
+                    [], self.output(), givens=givens)
+            self._hist_activation = plt.figure()
+            self.histact_ax = self._hist_activation.add_subplot(111)
+        else:
+            self.histact_ax.cla()
+
+        n, bins, patches = self.histact_ax.hist(
+            self.get_activation().flatten(), 50, facecolor='red'
+        )
+        self._hist_activation.canvas.draw()
+        
+        if verbose:
+            plt.pause(0.05)
+        else:
+            plt.savefig(filename)
+
 
 class StackedLayer(Layer):
     def __init__(self, models_stack=[], varin=None):
@@ -311,10 +355,10 @@ class StackedLayer(Layer):
         That's why we flatten the models_stack attribute while overidding "+"
         operator.
 
+        *Avoid to do the following unless you have a special reasoning on it.*
         However, it's still possible to create a nested StackedLayer object by
         directly calling the constructor of this class, passing a list with
-        elements of StackedLayer objects. ***Avoid to do this unless you have
-        a special reasoning on doing it.***
+        elements of StackedLayer objects.
         """
         assert len(models_stack) >= 1, "Warning: A Stacked Layer of empty " + \
                                        "models is trivial."
@@ -590,10 +634,12 @@ class TanhLayer(Layer):
         self.w = init_w
 
         if not init_b:
-            init_b = theano.shared(value=numpy.zeros(
-                                       n_out,
-                                       dtype=theano.config.floatX),
-                                   name='b_tanh', borrow=True)
+            init_b = theano.shared(
+                value=numpy.zeros(n_out,
+                                  dtype=theano.config.floatX),
+                name='b_tanh',
+                borrow=True
+            )
         else:
             assert init_b.get_value().shape == (n_out,)
         self.b = init_b
