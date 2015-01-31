@@ -222,7 +222,7 @@ class Layer(object):
                 "3rd entry of patch_shape has to be either 1 or 3."
             )
         try:
-            M = M.reshape((npatch, ) + patch_shape, order='F')
+            M = M.reshape((npatch, height, width, 3), order='F')
         except:
             raise ValueError("Wrong patch_shape.")
         
@@ -342,7 +342,7 @@ class StackedLayer(Layer):
            guarantees all features of Layer in an appropriate way.)
         3. By calling
             Layer(...) + Layer(...),
-            Layer(...) + StackedLayer(...)
+            Layer(...) + StackedLayer(...),
             StackedLayer(...) + Layer(...), or
             StackedLayer(...) + StackedLayer(...)
            we can get a *non-nested* StackedLayer object at its expression
