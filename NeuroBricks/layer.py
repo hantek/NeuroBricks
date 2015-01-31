@@ -2,7 +2,7 @@
 All parameters (excluding superparameters) in the model should be in theano var-
 iables or theano shared values. In the training part, these variables should be
 organized into "theano.function"s. So there should be no theano.function in the 
-definition of models here.
+definition of models here. Except for analysis part of codes.
 """
 import numpy
 import theano
@@ -147,7 +147,7 @@ class Layer(object):
                     *imshow_args, **imshow_keyargs):
         """
         Adapted from Roland Memisevic's code.
-        Display an array of rgb images. 
+        Display an array of images in RGB or grey format. 
         
         Parameters
         -----------
@@ -172,6 +172,8 @@ class Layer(object):
 
         Returns
         -----------
+
+
         Notes
         -----------
         Map the weights into a resonable representation by applying it onto
@@ -249,6 +251,37 @@ class Layer(object):
             self.wimg.set_data(im)
         self._draw_weight.canvas.draw()
 
+        if verbose:
+            plt.pause(0.05)
+        else:
+            plt.savefig(filename)
+
+    def hist_bias(self, verbose=True, filename='default_hist_layerb.png'):
+        """
+        Parameters
+        -----------
+        verbose : bool
+        filename : string
+    
+        Returns
+        -----------
+        Notes
+        -----------
+        """
+        assert hasattr(self, 'b'), "The layer need to have biases defined."
+        if not hasattr(self, '_hist_bias'):
+            if not hasattr(self, 'get_b'):
+                self.get_b = theano.function([], self.b)
+            self._hist_bias = plt.figure()
+            self.histb_ax = self._hist_bias.add_subplot(111)
+        else:
+            self.histb_ax.cla()
+
+        n, bins, patches = self.histb_ax.hist(
+            self.get_b().flatten(), 50, facecolor='blue'
+        )
+        self._hist_bias.canvas.draw()
+        
         if verbose:
             plt.pause(0.05)
         else:
