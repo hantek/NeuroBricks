@@ -12,9 +12,9 @@ Easy to rearrange diffrent layers, be it pretrained or not, into new models. It 
 
  - **Separability**
 
-We make training methods completely separated to the models. With this separability, you can train a network with any accessible training methods. 
+We make training methods completely separated to the models. With this separability, you can apply any training methods on any networks you built. 
  
-We also ensures that diffent kinds of training mechanisms get independent to each other. This allows you to combine different tricks together to form very complicated training procedures, like combining Dropout, Feedback Alignment, and unsupervised pretraining together, without having to define a new training class.
+We also ensure that diffent kinds of training mechanisms get independent to each other. This allows you to combine different tricks together to form very complicated training procedures, like combining Dropout, Feedback Alignment, and unsupervised pretraining together, without having to define a new training class.
 
  - **Interactive Analysis**
 

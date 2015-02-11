@@ -82,6 +82,7 @@ class Layer(object):
             self._wTw = plt.figure()
             self.wTw_ax = self._wTw.add_subplot(111)
             plt.gray()
+            plt.title(self._print_str() + ': wTw')
             self.wTw_ip = self.wTw_ax.imshow(self.get_w_cov())
         else:
             self.wTw_ip.set_data(self.get_w_cov())
@@ -101,6 +102,7 @@ class Layer(object):
             self._naiveplot_weight = plt.figure()
             self.naive_ax = self._naiveplot_weight.add_subplot(111)
             plt.gray()
+            plt.title('weight matrix ' + self._print_str())
             self.naive_ip = self.naive_ax.imshow(self.get_w())
         else:
             self.naive_ip.set_data(self.get_w())
@@ -137,6 +139,7 @@ class Layer(object):
         )
         self._hist_weight.canvas.draw()
         
+        plt.title('weight histogram ' + self._print_str())
         if verbose:
             plt.pause(0.05)
         else:
@@ -252,6 +255,7 @@ class Layer(object):
             self.wimg.set_data(im)
         self._draw_weight.canvas.draw()
 
+        plt.title('weight plot ' + self._print_str())
         if verbose:
             plt.pause(0.05)
         else:
@@ -279,10 +283,11 @@ class Layer(object):
             self.histb_ax.cla()
 
         n, bins, patches = self.histb_ax.hist(
-            self.get_b().flatten(), 50, facecolor='blue'
+            self.get_b().flatten(), 50, facecolor='c'
         )
         self._hist_bias.canvas.draw()
         
+        plt.title('bias histogram ' + self._print_str())
         if verbose:
             plt.pause(0.05)
         else:
@@ -326,6 +331,7 @@ class Layer(object):
         )
         self._hist_activation.canvas.draw()
         
+        plt.title('activation histogram ' + self._print_str())
         if verbose:
             plt.pause(0.05)
         else:
