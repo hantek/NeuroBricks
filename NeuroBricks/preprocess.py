@@ -6,7 +6,6 @@ import theano.tensor as T
 from sklearn.decomposition import PCA
 from layer import Layer, LinearLayer
 
-import pdb
 
 def pca_whiten(data, residual):
     pca_model = PCA(n_components=data.shape[1])
@@ -34,6 +33,9 @@ class PCA(object):
             The difference between a neuralized PCA Layer and a normal linear
             layer is the biases are on the visible side, and the weights are
             initialized as PCA transforming matrix.
+
+            Though it is literally called PCA layer, but it is also used as
+            building block for other transformations, like ZCA.
             """
             super(PCA.NeuralizedPCALayer, self).__init__(n_in, n_out, varin=varin)
             if not npy_rng:
@@ -58,20 +60,14 @@ class PCA(object):
         def activ_prime(self):
             return 1.
 
-
-    def __init__(self, retain=None):
-        """
-        A theano based PCA capable of using GPU.
-        """
-        self.retain = retain
-
-    def fit(self, data, batch_size=10000, verbose=True, whiten=False):
+    def fit(self, data, retain=None, batch_size=10000, verbose=True, whiten=False):
         """
         Part of the code is adapted from Roland Memisevic's code.
         fit() establishes 2 LinearLayer objects: PCAForwardLayer and
         PCABackwardLayer. They define how the data is mapped after the PCA
         mapping is learned.
         """
+        self.retain = retain
         assert isinstance(data, numpy.ndarray), \
                "data has to be a numpy ndarray."
         data = data.copy().astype(theano.config.floatX)
@@ -131,13 +127,14 @@ class PCA(object):
             end = min((bidx + 1) * batch_size, ncases)
             fun_update_covmat(data[start:end, :])
         if verbose:     print "Done."
+        self.covmat = covmat.get_value()
 
         # compute eigenvalue and eigenvector
         if verbose:     print "Eigen-decomposition...",; sys.stdout.flush()
         # u should be real valued vector, which stands for the variace of data
         # at each PC. v should be a real valued orthogonal matrix.
-        u, v = numpy.linalg.eigh(covmat.get_value())
-        v = v[:, numpy.argsort(u)[::-1]]
+        u, v_unsorted = numpy.linalg.eigh(self.covmat)
+        self.v = v_unsorted[:, numpy.argsort(u)[::-1]]
         u.sort()
         u = u[::-1]
         # throw away some eigenvalues for numerical stability
@@ -163,13 +160,15 @@ class PCA(object):
         if verbose:
             print "Number of selected PCs: %d, ratio of retained std: %f" % \
                 (self.retain, self.std_fracs[self.retain-1])
-        
+        self._build_layers(whiten)
+    
+    def _build_layers(self, whiten):        
         # decide if or not to whiten data
         if whiten:
-            pca_forward = v[:, :self.retain] / self.stds[:self.retain]
-            pca_backward = (v[:, :self.retain] * self.stds[:self.retain]).T
+            pca_forward = self.v[:, :self.retain] / self.stds[:self.retain]
+            pca_backward = (self.v[:, :self.retain] * self.stds[:self.retain]).T
         else:
-            pca_forward = v[:, :self.retain]
+            pca_forward = self.v[:, :self.retain]
             pca_backward = pca_forward.T
 
         # build transforming layers
@@ -194,6 +193,7 @@ class PCA(object):
             n_in=self.retain, n_out=self.ndim,
             init_w=pca_backward_w, init_b=pca_backward_bvis
         )
+        self.outdim = self.retain
 
     def forward(self, data, batch_size=10000, verbose=True):
         """
@@ -213,11 +213,11 @@ class PCA(object):
         ------------
         numpy.ndarray object.
         """
-        assert hasattr(self, 'forward_layer'), 'You should fit PCA first.'
+        assert hasattr(self, 'forward_layer'), 'Please fit the model first.'
         data = data.astype(theano.config.floatX)
         ncases, ndim = data.shape
         assert ndim == self.ndim, \
-            'Given data dimension doesn\'t match the learned PCA model.'
+            'Given data dimension doesn\'t match the learned model.'
         nbatches = (ncases + batch_size - 1) / batch_size
         map_function = theano.function(
             [self.forward_layer.varin],
@@ -248,11 +248,11 @@ class PCA(object):
         ------------
         numpy.ndarray object.
         """
-        assert hasattr(self, 'backward_layer'), 'You should fit PCA first.'
+        assert hasattr(self, 'backward_layer'), 'Please fit the model first.'
         data = data.astype(theano.config.floatX)
         ncases, ndim = data.shape
-        assert ndim == self.retain, \
-            'Given data dimension doesn\'t match the learned PCA model.'
+        assert ndim == self.outdim, \
+            'Given data dimension doesn\'t match the learned model.'
         nbatches = (ncases + batch_size - 1) / batch_size
         map_function = theano.function(
             [self.backward_layer.varin],
@@ -275,14 +275,58 @@ class PCA(object):
     def energy_dist(self,):
         """
         """
-        assert hasattr(self, 'std_fracs'), "The PCA model has not fitted."
+        assert hasattr(self, 'std_fracs'), "The model has not been fitted."
         return self.std_fracs
+
+
+class ZCA(PCA):
+    def _build_layers(self, whiten):
+        # decide if or not to whiten data
+        if whiten:
+            zca_forward = numpy.dot(
+                self.v[:, :self.retain] / self.stds[:self.retain],
+                self.v[:, :self.retain].T
+            )
+            zca_backward = numpy.dot(
+                self.v[:, :self.retain],
+                (self.v[:, :self.retain] * self.stds[:self.retain]).T
+            )
+        else:
+            zca_forward = numpy.dot(
+                self.v[:, :self.retain],
+                self.v[:, :self.retain].T
+            )
+            zca_backward = zca_forward
+            
+        # build transforming layers
+        zca_forward_w = theano.shared(
+            value=zca_forward, name='zca_fwd', borrow=True
+        )
+        zca_forward_bvis = theano.shared(
+            value=self.mean, name='zca_fwd_bvis', borrow=True
+        )
+        self.forward_layer = self.NeuralizedPCALayer(
+            n_in=self.ndim, n_out=self.ndim,
+            init_w=zca_forward_w, init_bvis=zca_forward_bvis
+        )
+
+        zca_backward_w = theano.shared(
+            value=zca_backward, name='zca_bkwd', borrow=True
+        )
+        zca_backward_bvis = theano.shared(
+            value=self.mean, name='zca_bkwd_bvis', borrow=True
+        )
+        self.backward_layer = LinearLayer(
+            n_in=self.ndim, n_out=self.ndim,
+            init_w=zca_backward_w, init_b=zca_backward_bvis
+        )
+        self.outdim = self.ndim
 
 
 class SubtractMean(Layer):
     def __init__(self, n_in, varin=None):
         """
-        For each sample, sbtract its mean value. So the output for one certain
+        For each sample, subtract its mean value. So the output for one certain
         sample is fixed, and doesn't change w.r.t. other samples.
         """
         super(SubtractMean, self).__init__(n_in, n_in, varin=varin)
