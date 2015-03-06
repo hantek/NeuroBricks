@@ -160,9 +160,9 @@ class GraddescentMinibatch(object):
         self.epochcount += 1
         stop = time.time()
         if self.verbose:
-            print 'epoch %d: %.2fs, lr %f cost %f, ' % (
+            print 'epoch %d: %.2fs, lr %.3g cost %.6g, ' % (
                 self.epochcount, (stop - start), self.learningrate, cost) + \
-                  'update norm %f angle(RAD) %.3f' % (norm, angle_rad)
+                  'update norm %.3g angle(RAD) %.3f' % (norm, angle_rad)
 
         return cost
 

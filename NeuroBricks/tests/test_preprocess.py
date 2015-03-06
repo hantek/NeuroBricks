@@ -62,23 +62,23 @@ def test_PCA():
     assert numpy.allclose(pcaed_data.std(0)[:700].mean(), 1.0)
     assert numpy.allclose(data, recons_data)
 
-    pca_obj = PCA(retain=500)
-    pca_obj.fit(data, whiten=False)
+    pca_obj = PCA()
+    pca_obj.fit(data, whiten=False, retain=500)
     pcaed_data = pca_obj.forward(data)
     assert pcaed_data.shape == (50000, 500)
-    pca_obj.fit(data, whiten=True)
+    pca_obj.fit(data, whiten=True, retain=500)
     pcaed_data = pca_obj.forward(data)
     assert numpy.allclose(pcaed_data.std(0), numpy.ones(500))
     assert pcaed_data.shape == (50000, 500)
 
-    pca_obj = PCA(retain=0.99)
-    pca_obj.fit(data, whiten=False)
+    pca_obj = PCA()
+    pca_obj.fit(data, whiten=False, retain=0.99)
     recons_data = pca_obj.backward(pca_obj.forward(data))
     # calculation of std ratio is still not very accurate. 
     assert (numpy.sum(recons_data.std(0)) - \
             numpy.sum(pca_obj.std_fracs[pca_obj.retain-1] * data.std(0)))**2 \
            < 1e-2 * numpy.sum(data.std(0))
-    pca_obj.fit(data, whiten=True)
+    pca_obj.fit(data, whiten=True, retain=0.99)
     pcaed_data = pca_obj.forward(data)
     assert numpy.allclose(pcaed_data.std(0), numpy.ones(pcaed_data.shape[1]))
 
