@@ -3,7 +3,6 @@ import copy
 import numpy
 import theano
 import theano.tensor as T
-from sklearn.decomposition import PCA
 from layer import Layer, LinearLayer
 
 
