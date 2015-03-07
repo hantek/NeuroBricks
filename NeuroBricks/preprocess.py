@@ -7,42 +7,6 @@ from sklearn.decomposition import PCA
 from layer import Layer, LinearLayer
 
 
-def pca_whiten(data, residual):
-    pca_model = PCA(n_components=data.shape[1])
-    pca_model.fit(data)
-    energy_dist = pca_model.explained_variance_ratio_
-    total_energy = sum(energy_dist)
-    target_energy = (1 - residual) * total_energy
-    
-    i = 0
-    sum_energy = 0
-    while sum_energy < target_energy:
-        sum_energy += energy_dist[i]
-        i += 1
-
-    pca_model = PCA(n_components=i, whiten=True)
-    pca_model.fit(data)
-    return pca_model.transform(data), pca_model
-
-
-<<<<<<< HEAD
-class PCA(object):
-    class NeuralizedPCALayer(Layer):
-        def __init__(self, n_in, n_out, init_w, init_bvis,
-                     varin=None, npy_rng=None):
-            """
-            The difference between a neuralized PCA Layer and a normal linear
-            layer is the biases are on the visible side, and the weights are
-            initialized as PCA transforming matrix.
-
-            Though it is literally called PCA layer, but it is also used as
-            building block for other transformations, like ZCA.
-            """
-            super(PCA.NeuralizedPCALayer, self).__init__(n_in, n_out, varin=varin)
-            if not npy_rng:
-                npy_rng = numpy.random.RandomState(123)
-            assert isinstance(npy_rng, numpy.random.RandomState)
-=======
 class NeuralizedPCALayer(Layer):
     def __init__(self, n_in, n_out, init_w, init_bvis,
                  varin=None, npy_rng=None):
@@ -50,12 +14,14 @@ class NeuralizedPCALayer(Layer):
         The difference between a neuralized PCA Layer and a normal linear
         layer is the biases are on the visible side, and the weights are
         initialized as PCA transforming matrix.
+
+        Though it is literally called PCA layer, but it is also used as
+        building block for other transformations, like ZCA.
         """
         super(NeuralizedPCALayer, self).__init__(n_in, n_out, varin=varin)
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
->>>>>>> c0636041cb906b41dc92d1a7c73f6c4ce1b1f332
 
         if (not init_w) or (not init_bvis):
             raise TypeError("You should specify value for init_w and " + \
@@ -72,8 +38,6 @@ class NeuralizedPCALayer(Layer):
     def output(self):
         return self.fanin()
 
-<<<<<<< HEAD
-=======
     def activ_prime(self):
         return 1.
 
@@ -82,8 +46,8 @@ class PCA(object):
     """
     A theano based PCA capable of using GPU.
     """
->>>>>>> c0636041cb906b41dc92d1a7c73f6c4ce1b1f332
-    def fit(self, data, retain=None, batch_size=10000, verbose=True, whiten=False):
+    def fit(self, data, retain=None, batch_size=10000, verbose=True,
+            whiten=False):
         """
         Part of the code is adapted from Roland Memisevic's code.
         fit() establishes 2 LinearLayer objects: PCAForwardLayer and
@@ -138,7 +102,8 @@ class PCA(object):
         fun_update_covmat = theano.function(
             inputs=[data_batch],
             outputs=[],
-            updates={covmat: covmat + T.dot(data_batch.T, data_batch) / np_ncases}
+            updates={covmat: covmat + \
+                             T.dot(data_batch.T, data_batch) / np_ncases}
         )
         if verbose:
             print "Computing covariance, %d dots to punch:" % nbatches,
@@ -162,7 +127,7 @@ class PCA(object):
         u = u[::-1]
         # throw away some eigenvalues for numerical stability
         self.stds = numpy.sqrt(u[u > 0.])
-        self.varinace_fracs = (self.stds ** 2).cumsum() / (self.stds ** 2).sum()
+        self.variance_fracs = (self.stds ** 2).cumsum() / (self.stds ** 2).sum()
         self.maxPCs = self.stds.shape[0]
         if verbose:     print "Done. Maximum stable PCs: %d" % self.maxPCs 
         
@@ -179,19 +144,13 @@ class PCA(object):
             assert (self.retain > 0 and self.retain <= self.maxPCs), error_info
         elif isinstance(self.retain, float):
             assert (self.retain > 0 and self.retain < 1), error_info
-            self.retain = numpy.sum(self.varinace_fracs < self.retain) + 1
+            self.retain = numpy.sum(self.variance_fracs < self.retain) + 1
         if verbose:
-<<<<<<< HEAD
-            print "Number of selected PCs: %d, ratio of retained std: %f" % \
-                (self.retain, self.std_fracs[self.retain-1])
+            print "Number of selected PCs: %d, ratio of retained variance: %f"%\
+                (self.retain, self.variance_fracs[self.retain-1])
         self._build_layers(whiten)
     
     def _build_layers(self, whiten):        
-=======
-            print "Number of selected PCs: %d, ratio of retained variance: %f" % \
-                (self.retain, self.varinace_fracs[self.retain-1])
-        
->>>>>>> c0636041cb906b41dc92d1a7c73f6c4ce1b1f332
         # decide if or not to whiten data
         if whiten:
             pca_forward = self.v[:, :self.retain] / self.stds[:self.retain]
@@ -304,8 +263,9 @@ class PCA(object):
     def energy_dist(self,):
         """
         """
-        assert hasattr(self, 'std_fracs'), "The model has not been fitted."
-        return self.std_fracs
+        assert hasattr(self, 'variance_fracs'), \
+            "The model has not been fitted."
+        return self.variance_fracs
 
 
 class ZCA(PCA):
@@ -334,7 +294,7 @@ class ZCA(PCA):
         zca_forward_bvis = theano.shared(
             value=self.mean, name='zca_fwd_bvis', borrow=True
         )
-        self.forward_layer = self.NeuralizedPCALayer(
+        self.forward_layer = NeuralizedPCALayer(
             n_in=self.ndim, n_out=self.ndim,
             init_w=zca_forward_w, init_bvis=zca_forward_bvis
         )

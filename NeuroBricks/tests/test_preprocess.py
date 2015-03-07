@@ -7,6 +7,7 @@ from preprocess import SubtractMeanAndNormalize
 
 
 def test_PCA():
+    """The test only works for CPU codes now."""
     # first, a 2-d data, testing the reconstruction and whitening
     random_state = 123
     rng = numpy.random.RandomState(random_state)
@@ -51,6 +52,7 @@ def test_PCA():
 
     # second, real data, testing numerical stability
     data = pickle.load(open('/data/lisa/data/mnist/mnist.pkl', 'r'))
+    #data = pickle.load(open('/home/hantek/data/mnist.pkl', 'r'))
     data = data[0][0]
     pca_obj = PCA()
     pca_obj.fit(data, whiten=False)
@@ -74,10 +76,14 @@ def test_PCA():
     pca_obj = PCA()
     pca_obj.fit(data, whiten=False, retain=0.99)
     recons_data = pca_obj.backward(pca_obj.forward(data))
-    # calculation of std ratio is still not very accurate. 
-    assert (numpy.sum(recons_data.std(0)) - \
-            numpy.sum(pca_obj.std_fracs[pca_obj.retain-1] * data.std(0)))**2 \
-           < 1e-2 * numpy.sum(data.std(0))
+    # calculation of variance ratio is still not very accurate. But that is
+    # due to numerical problems, and doesn't cause any practical problem.
+    assert numpy.allclose(
+        (numpy.sum(recons_data.var(0)) - \
+         pca_obj.variance_fracs[pca_obj.outdim-1] * \
+         numpy.sum(data.var(0)))**4,
+        0
+    )
     pca_obj.fit(data, whiten=True, retain=0.99)
     pcaed_data = pca_obj.forward(data)
     assert numpy.allclose(pcaed_data.std(0), numpy.ones(pcaed_data.shape[1]))
