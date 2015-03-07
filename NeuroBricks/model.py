@@ -10,7 +10,7 @@ import theano.tensor as T
 import matplotlib
 # matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from layer import Layer, SigmoidLayer, LinearLayer, ZerobiasLayer
+from layer import Layer, SigmoidLayer, LinearLayer, ZerobiasLayer, ReluLayer
 
 import pdb
 
@@ -289,7 +289,7 @@ class ClassicalAutoencoder(AutoEncoder):
         if self.hidtype == 'binary':
             dh = self.hidden() * (1 - self.hidden())  # sigmoid derivative
         elif self.hidtype == 'real':
-            dh = self.hidden()  # linear activation derivative
+            dh = 1.  # self.hidden()  # linear activation derivative
         contraction_per_case = T.sum(T.dot(dh**2, self.w.T**2), axis=1)
         return contract_level * T.mean(contraction_per_case)
 
@@ -355,6 +355,93 @@ class ZerobiasAutoencoder(AutoEncoder):
         return ZerobiasLayer(
             self.n_in, self.n_hid, threshold=self.threshold,
             varin=self.varin, init_w=self.w
+        )
+
+    def decoder(self):
+        if self.vistype == 'binary':
+            return SigmoidLayer(
+                self.n_hid, self.n_in, varin=self.encoder().output(),
+                init_w=self.wT, init_b=self.bT
+            )
+        elif self.vistype == 'real':
+            return LinearLayer(
+                self.n_hid, self.n_in, varin=self.encoder().output(),
+                init_w=self.wT, init_b=self.bT
+            )
+
+
+class ReluAutoencoder(AutoEncoder):
+    def __init__(self, n_in, n_hid, vistype, varin=None, tie=True,
+                 init_w=None, init_b=None, init_wT=None, init_bT=None, 
+                 npy_rng=None):
+        super(ReluAutoencoder, self).__init__(
+            n_in, n_hid, vistype=vistype, varin=varin
+        )
+
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+
+        if not init_w:
+            w = numpy.asarray(npy_rng.uniform(
+                low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+                high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+                size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
+            init_w = theano.shared(value=w, name='w_reluae', borrow=True)
+        # else:
+        #     TODO. The following assetion is complaining about an attribute
+        #     error while passing w.T to init_w. Considering using a more
+        #     robust way of assertion in the future.
+        #     assert init_w.get_value().shape == (n_in, n_out)
+        self.w = init_w
+
+        if not init_b:
+            init_b = theano.shared(
+                value=numpy.zeros(self.n_hid, dtype=theano.config.floatX),
+                name='b_reluae_encoder',
+                borrow=True
+            )
+        else:
+            assert init_b.get_value().shape == (self.n_hid,)
+        self.b = init_b
+        
+        if tie:
+            assert init_wT == None, "Tied autoencoder do not accept init_wT."
+            init_wT = self.w.T
+        else:
+            if not init_wT:
+                wT = numpy.asarray(npy_rng.uniform(
+                    low = -4 * numpy.sqrt(6. / (self.n_hid + self.n_in)),
+                    high = 4 * numpy.sqrt(6. / (self.n_hid + self.n_in)),
+                    size=(self.n_hid, self.n_in)), dtype=theano.config.floatX)
+                init_wT = theano.shared(value=w, name='wT_reluae', borrow=True)
+            # else:
+            #     TODO. The following assetion is complaining about an attribute
+            #     error while passing w.T to init_w. Considering using a more
+            #     robust way of assertion in the future.
+            #     assert init_wT.get_value().shape == (n_in, n_out)
+        self.wT = init_wT
+
+        if not init_bT:
+            init_bT = theano.shared(
+                value=numpy.zeros(self.n_in, dtype=theano.config.floatX),
+                name='b_reluae_decoder',
+                borrow=True
+            )
+        else:
+            assert init_bT.get_value().shape == (self.n_in,)
+        self.bT = init_bT
+
+        self.params = [self.w, self.b]
+        if tie:
+            self.params_private = self.params + [self.bT]
+        else:
+            self.params_private = self.params + [self.wT, self.bT]
+
+    def encoder(self):
+        return ReluLayer(
+            self.n_in, self.n_hid,
+            varin=self.varin, init_w=self.w, init_b=self.b
         )
 
     def decoder(self):

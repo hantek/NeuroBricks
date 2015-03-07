@@ -25,6 +25,7 @@ def pca_whiten(data, residual):
     return pca_model.transform(data), pca_model
 
 
+<<<<<<< HEAD
 class PCA(object):
     class NeuralizedPCALayer(Layer):
         def __init__(self, n_in, n_out, init_w, init_bvis,
@@ -41,25 +42,47 @@ class PCA(object):
             if not npy_rng:
                 npy_rng = numpy.random.RandomState(123)
             assert isinstance(npy_rng, numpy.random.RandomState)
+=======
+class NeuralizedPCALayer(Layer):
+    def __init__(self, n_in, n_out, init_w, init_bvis,
+                 varin=None, npy_rng=None):
+        """
+        The difference between a neuralized PCA Layer and a normal linear
+        layer is the biases are on the visible side, and the weights are
+        initialized as PCA transforming matrix.
+        """
+        super(NeuralizedPCALayer, self).__init__(n_in, n_out, varin=varin)
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+>>>>>>> c0636041cb906b41dc92d1a7c73f6c4ce1b1f332
 
-            if (not init_w) or (not init_bvis):
-                raise TypeError("You should specify value for init_w and " + \
-                                "init_bvis while instantiating this object.")
-            # else: TODO assert that they are of valid type.
+        if (not init_w) or (not init_bvis):
+            raise TypeError("You should specify value for init_w and " + \
+                            "init_bvis while instantiating this object.")
+        # else: TODO assert that they are of valid type.
             
-            self.w = init_w
-            self.bvis = init_bvis
-            self.params = [self.w, self.bvis]
+        self.w = init_w
+        self.bvis = init_bvis
+        self.params = [self.w, self.bvis]
 
-        def fanin(self):
-            return T.dot(self.varin - self.bvis, self.w)
+    def fanin(self):
+        return T.dot(self.varin - self.bvis, self.w)
 
-        def output(self):
-            return self.fanin()
+    def output(self):
+        return self.fanin()
 
-        def activ_prime(self):
-            return 1.
+<<<<<<< HEAD
+=======
+    def activ_prime(self):
+        return 1.
 
+
+class PCA(object):
+    """
+    A theano based PCA capable of using GPU.
+    """
+>>>>>>> c0636041cb906b41dc92d1a7c73f6c4ce1b1f332
     def fit(self, data, retain=None, batch_size=10000, verbose=True, whiten=False):
         """
         Part of the code is adapted from Roland Memisevic's code.
@@ -139,7 +162,7 @@ class PCA(object):
         u = u[::-1]
         # throw away some eigenvalues for numerical stability
         self.stds = numpy.sqrt(u[u > 0.])
-        self.std_fracs = self.stds.cumsum() / self.stds.sum()
+        self.varinace_fracs = (self.stds ** 2).cumsum() / (self.stds ** 2).sum()
         self.maxPCs = self.stds.shape[0]
         if verbose:     print "Done. Maximum stable PCs: %d" % self.maxPCs 
         
@@ -156,13 +179,19 @@ class PCA(object):
             assert (self.retain > 0 and self.retain <= self.maxPCs), error_info
         elif isinstance(self.retain, float):
             assert (self.retain > 0 and self.retain < 1), error_info
-            self.retain = numpy.sum(self.std_fracs < self.retain) + 1
+            self.retain = numpy.sum(self.varinace_fracs < self.retain) + 1
         if verbose:
+<<<<<<< HEAD
             print "Number of selected PCs: %d, ratio of retained std: %f" % \
                 (self.retain, self.std_fracs[self.retain-1])
         self._build_layers(whiten)
     
     def _build_layers(self, whiten):        
+=======
+            print "Number of selected PCs: %d, ratio of retained variance: %f" % \
+                (self.retain, self.varinace_fracs[self.retain-1])
+        
+>>>>>>> c0636041cb906b41dc92d1a7c73f6c4ce1b1f332
         # decide if or not to whiten data
         if whiten:
             pca_forward = self.v[:, :self.retain] / self.stds[:self.retain]
@@ -178,7 +207,7 @@ class PCA(object):
         pca_forward_bvis = theano.shared(
             value = self.mean, name='pca_fwd_bvis', borrow=True
         )
-        self.forward_layer = self.NeuralizedPCALayer(
+        self.forward_layer = NeuralizedPCALayer(
             n_in=self.ndim, n_out=self.retain,
             init_w=pca_forward_w, init_bvis=pca_forward_bvis
         )
