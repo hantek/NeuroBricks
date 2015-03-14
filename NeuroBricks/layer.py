@@ -7,6 +7,9 @@ definition of models here. Except for analysis part of codes.
 import numpy
 import theano
 import theano.tensor as T
+from theano.tensor.nnet import conv
+from theano.tensor.signal import downsample
+
 import matplotlib
 # matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -502,8 +505,8 @@ class LinearLayer(Layer):
 
         if not init_w:
             w = numpy.asarray(npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (n_in + n_out)),
-                high = 4 * numpy.sqrt(6. / (n_in + n_out)),
+                low = -numpy.sqrt(6. / (n_in + n_out)),
+                high = numpy.sqrt(6. / (n_in + n_out)),
                 size=(n_in, n_out)), dtype=theano.config.floatX)
             init_w = theano.shared(value=w, name='w_linear', borrow=True)
         # else:
@@ -544,15 +547,10 @@ class ZerobiasLayer(Layer):
 
         if not init_w:
             w = numpy.asarray(npy_rng.uniform(
-                low=-4 * numpy.sqrt(6. / (n_in + n_out)),
-                high=4 * numpy.sqrt(6. / (n_in + n_out)),
+                low = -numpy.sqrt(6. / (n_in + n_out)),
+                high = numpy.sqrt(6. / (n_in + n_out)),
                 size=(n_in, n_out)), dtype=theano.config.floatX)
             init_w = theano.shared(value=w, name='w_zerobias', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
         self.w = init_w
 
         self.params = [self.w]
@@ -628,8 +626,8 @@ class TanhLayer(Layer):
 
         if not init_w:
             w = numpy.asarray(npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (n_in + n_out)),
-                high = 4 * numpy.sqrt(6. / (n_in + n_out)),
+                low = -numpy.sqrt(6. / (n_in + n_out)),
+                high = numpy.sqrt(6. / (n_in + n_out)),
                 size=(n_in, n_out)), dtype=theano.config.floatX)
             init_w = theano.shared(value=w, name='w_tanh', borrow=True)
         # else:
@@ -641,8 +639,7 @@ class TanhLayer(Layer):
 
         if not init_b:
             init_b = theano.shared(
-                value=numpy.zeros(n_out,
-                                  dtype=theano.config.floatX),
+                value=numpy.zeros(n_out, dtype=theano.config.floatX),
                 name='b_tanh',
                 borrow=True
             )
@@ -665,4 +662,172 @@ class TanhLayer(Layer):
 
 class GatedLinearLayer(Layer):
     def __init__(self):
+        raise NotImplementedError("Not implemented yet...")
+
+
+class Conv2DLayer(Layer):
+    def __init__(self, n_in, filter_shape, n_out=None, varin=None,
+                 init_w, init_b, npy_rng=None):
+        """
+        This is a base class for all 2-D convolutional classes using various of
+        activation functions. For more complex ConvNet filters, like network in
+        network, don't inherit from this class.
+
+        Parameters
+        -----------
+        n_in : tuple
+        Specifies the dimension of input. The dimension is in bc01 order, i.e.,
+        (batch size, # input channels, # input height, # input width)
+        The boring thing is that we need to determine batch size, which belongs
+        to training and has nothing to do with the model itself, while building
+        the model. 
+
+        n_out : tuple
+        Specifies the dimension of output. Should be consistant to the
+        convolution of filter_shape and n_in.
+
+        filter_shape : tuple
+        Specifies the filter shape. The dimension is in the order bc01, i.e.
+        (# filters, # input channels, # filter height, # filter width)
+
+        varin
+
+        init_w
+
+        init_b
+
+        npy_rng
+        
+        """
+        assert len(filter_shape) == 4, \
+                "filter_shape has to be a 4-D tuple ordered in this way: "
+                "(# filters, # input channels, # filter height, # filter width)"
+        assert len(n_in) == 4, \
+                "n_in is expected to be a 4-D tuple ordered in this way: "
+                "(batch size, # input channels, # input height, # input width)"
+        # filter_shape[1] has to be the same to n_in[1]
+        n_out_calcu = (n_in[0], filter_shape[0],
+                       n_in[2] - filter_shape[2] + 1,
+                       n_in[3] - filter_shape[3] + 1)
+        if not n_out:
+            n_out = n_out_calcu
+        assert n_out == n_out_calcu, "Given n_out doens't match actual output."
+        super(Conv2DLayer, self).__init__(n_in, n_out, varin=varin)
+        self.varin = self.varin.reshape(self.n_in)
+        self.filter_shape = filter_shape
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
+
+        if not init_w:
+            numparam_per_filter = numpy.prod(filter_shape[1:])
+            w = _weight_initialization()
+            init_w = theano.shared(value=w, name='w_conv2d', borrow=True)
+        # else:
+        #     TODO. The following assetion is complaining about an attribute
+        #     error while passing w.T to init_w. Considering using a more
+        #     robust way of assertion in the future.
+        #     assert init_w.get_value().shape == (n_in, n_out)
+        self.w = init_w
+
+        if not init_b:
+            init_b = theano.shared(
+                value=numpy.zeros((filter_shape[0],), dtype=theano.config.floatX),
+                name='b_conv2d',
+                borrow=True
+            )
+        else:
+            assert init_b.get_value().shape == (filter_shape[0],)
+        self.b = init_b.dimshuffle('x', 0, 'x', 'x')
+
+        self.params = [self.w, self.b]
+        
+
+    def _weight_initialization(self):
+        numparam_per_filter = numpy.prod(self.filter_shape[1:])
+        w = numpy.asarray(self.npy_rng.uniform(
+            low = -numpy.sqrt(3. / numparam_per_filter),
+            high = numpy.sqrt(3. / numparam_per_filter),
+            size=self.filter_shape), dtype=theano.config.floatX)
+        return w
+
+    def fanin(self):
+        return conv.conv2d(
+            input=self.varin, filters=self.w,
+            filter_shape=self.filter_shape, image_shape=self.n_in
+        ) + self.b
+
+    def output(self):
+        raise NotImplementedError("Must be implemented by subclass.")
+
+    def activ_prime(self):
+        raise NotImplementedError("Not implemented yet...")
+
+
+class ReluConv2DLayer(Conv2DLayer):
+    # def _weight_initialization(self):
+    # we should adjust this scale specifically for Relu.  
+
+    def output(self):
+        T.maximum(self.fanin(), 0.)
+
+    def activ_prime(self):
+        raise NotImplementedError("Not implemented yet...")
+
+
+class PoolingLayer(Layer):
+    def __init__(self, n_in, pool_size, ignore_border=False, n_out=None,
+                 varin=None):
+        """
+        Parameters
+        -----------
+        n_in : tuple
+        Specifies the dimension of input. The dimension is in bc01 order, i.e.,
+        (batch size, # input channels, # input height, # input width)
+        The boring thing is that we need to determine batch size, which belongs
+        to training and has nothing to do with the model itself, while building
+        the model. 
+
+        pool_size :
+
+        ignore_border :
+        
+        n_out : tuple
+        Specifies the dimension of output. Should be consistant to the
+        convolution of filter_shape and n_in.
+
+        varin
+
+        """
+        assert len(n_in) == 4, \
+                "n_in is expected to be a 4-D tuple ordered in this way: "
+                "(batch size, # input channels, # input height, # input width)"
+        assert len(pool_size) == 2, "pool_size should be a 2-D tuple in the "
+                                    "form (# rows, # cols)"
+        n_out_calcu = (n_in[0], n_in[1], n_in[2] / pool_size[0],
+                       n_in[3] / pool_size[1])
+        if not n_out:
+            n_out = n_out_calcu
+        assert n_out == n_out_calcu, "Given n_out doens't match actual output."
+        super(PoolingLayer, self).__init__(n_in, n_out, varin=varin)
+        self.varin = self.varin.reshape(self.n_in)
+        self.pool_size = pool_size
+        self.ignore_border = ignore_border
+
+    def output(self):
+        raise NotImplementedError("Must be implemented by subclass.")
+
+    def activ_prime(self):
+        raise NotImplementedError("Not implemented yet...")
+
+
+class MaxPoolingLayer(PoolingLayer):
+    def output(self):
+        return downsample.max_pool_2d(
+            input=self.varin, ds=self.pool_size,
+            ignore_border=self.ignore_border
+        )
+
+    def activ_prime(self):
         raise NotImplementedError("Not implemented yet...")
