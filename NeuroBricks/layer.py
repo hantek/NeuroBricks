@@ -667,7 +667,7 @@ class GatedLinearLayer(Layer):
 
 class Conv2DLayer(Layer):
     def __init__(self, n_in, filter_shape, n_out=None, varin=None,
-                 init_w, init_b, npy_rng=None):
+                 init_w=None, init_b=None, npy_rng=None):
         """
         This is a base class for all 2-D convolutional classes using various of
         activation functions. For more complex ConvNet filters, like network in
@@ -700,10 +700,10 @@ class Conv2DLayer(Layer):
         
         """
         assert len(filter_shape) == 4, \
-                "filter_shape has to be a 4-D tuple ordered in this way: "
+                "filter_shape has to be a 4-D tuple ordered in this way: " + \
                 "(# filters, # input channels, # filter height, # filter width)"
         assert len(n_in) == 4, \
-                "n_in is expected to be a 4-D tuple ordered in this way: "
+                "n_in is expected to be a 4-D tuple ordered in this way: " + \
                 "(batch size, # input channels, # input height, # input width)"
         # filter_shape[1] has to be the same to n_in[1]
         n_out_calcu = (n_in[0], filter_shape[0],
@@ -801,10 +801,10 @@ class PoolingLayer(Layer):
 
         """
         assert len(n_in) == 4, \
-                "n_in is expected to be a 4-D tuple ordered in this way: "
+                "n_in is expected to be a 4-D tuple ordered in this way: " + \
                 "(batch size, # input channels, # input height, # input width)"
-        assert len(pool_size) == 2, "pool_size should be a 2-D tuple in the "
-                                    "form (# rows, # cols)"
+        assert len(pool_size) == 2, "pool_size should be a 2-D tuple in " + \
+                                    "the form (# rows, # cols)"
         n_out_calcu = (n_in[0], n_in[1], n_in[2] / pool_size[0],
                        n_in[3] / pool_size[1])
         if not n_out:

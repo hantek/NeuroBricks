@@ -445,6 +445,8 @@ class Dropout(object):
     class DropoutLayer(Layer):
         def __init__(self, n_in, droprate, varin=None, theano_rng=None):
             super(Dropout.DropoutLayer, self).__init__(n_in, n_in, varin=varin)
+            assert (droprate >= 0. and droprate <= 1.), \
+                "droprate has to be in the interval [0, 1]."
             self.droprate = droprate
 
             if not theano_rng:
