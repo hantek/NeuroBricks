@@ -616,6 +616,49 @@ class ReluLayer(Layer):
         return (self.fanin() > 0.) * 1.
 
 
+class AbsLayer(Layer):
+    def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
+                 npy_rng=None):
+        super(AbsLayer, self).__init__(n_in, n_out, varin=varin)
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+
+        if not init_w:
+            w = numpy.asarray(npy_rng.uniform(
+                low = -4 * numpy.sqrt(6. / (n_in + n_out)),
+                high = 4 * numpy.sqrt(6. / (n_in + n_out)),
+                size=(n_in, n_out)), dtype=theano.config.floatX)
+            init_w = theano.shared(value=w, name='w_abs', borrow=True)
+        # else:
+        #     TODO. The following assetion is complaining about an attribute
+        #     error while passing w.T to init_w. Considering using a more
+        #     robust way of assertion in the future.
+        #     assert init_w.get_value().shape == (n_in, n_out)
+        self.w = init_w
+
+        if not init_b:
+            init_b = theano.shared(
+                value=numpy.zeros(n_out, dtype=theano.config.floatX),
+                name='b_abs',
+                borrow=True
+            )
+        else:
+            assert init_b.get_value().shape == (n_out,)
+        self.b = init_b
+
+        self.params = [self.w, self.b]
+
+    def fanin(self):
+        return T.dot(self.varin, self.w) + self.b
+
+    def output(self):
+        return T.abs_(self.fanin())
+
+    def activ_prime(self):
+        return (self.fanin() > 0.) * 2. - 1.
+
+
 class TanhLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
