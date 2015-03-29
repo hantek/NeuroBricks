@@ -1,7 +1,21 @@
 """
-You deside how the data set should be pre-processed, and how large the subset to
-be used. So, here this file is COMPLETELY free from theano. It reads dataset
-from its various initial format to numpy.ndarray.
+A dataset wrapper should only load its corresponding dataset from a pulically
+avaliable format to a user-favourable format. We choose numpy.ndarray as the
+ONLY format of output for all datasets. While at the mean time, it should make
+sure that the content in the dataset is kept intact. Anything that related to
+changing values of the dataset content should be considered as preprocessing
+and thus should go into the preprocessing file. For large datasets, a wrapper
+should provide an iterator to allow for iterative loading different parts of
+the dataset. 
+
+So,
+ - here this file is COMPLETELY free from theano, 
+ - all wrappers read dataset from various initial formats to numpy.ndarray,
+ - they provide an iterator for reading dataset, and
+ - they try to reserve as much as possible the raw content of dataset. 
+
+This is the fundamental design we should follow in this file. 
+
 
 for data:
 A 2-D vector (x) with each samples flattened into ROW. So x is of size
@@ -20,23 +34,169 @@ company with y_labels.
 for truth (regression):
 TODO
 """
-
+import os
+import gzip
+import cPickle
 import numpy
+from scipy.misc import imread
 
+import pdb
+
+
+def MNIST(file_path='/data/lisa/data/mnist.pkl.gz'):
+    """
+    MNIST is too tiny to have a iterator structure. A function is enough for it.
+    """
+    f = gzip.open('/data/lisa/data/mnist.pkl.gz', 'rb')
+    train_set, valid_set, test_set = cPickle.load(f)
+    f.close()
+    return train_set, valid_set, test_set
+
+
+class CatsnDogs(object):
+    def __init__(self, partsize=2500,
+                 trainfolderpath="/data/lisa/data/dogs_vs_cats/train",
+                 testfolderpath="/data/lisa/data/dogs_vs_cats/test1",
+                 validsize=5000,
+                 npy_rng=None):
+        """
+        This is a class with 3 iterators over traim, valid, test sets. The
+        validation set is split from training set. All the iterators should do
+        the following thing:
+        1. read every data sample in a randomly permutated way.
+        2. generate a part of data. This allows for subsequent preprocessing.
+           Since the images are of various sizes, so during each iteration it
+           generates a tuple of numpy arrays, with each array including one
+           image. Values in those arrays are completely raw, i.e., uint8 type.
+    
+        Parameters:
+        -------------------
+        partsize : int
+        Number of images in a generated data part. It is better to ensure that
+        this number is dividable for training, validation, and test size.
+        
+        testfolderpath : str
+        Path to unzipped test1 file. contains 12500 files numbered from 1 to
+        12500. 
+
+        validsize : int
+        To be fair for both cats and dogs, it has to be an even number.
+        """
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
+        assert validsize % 2 == 0, "validsize sould be an even number."
+        self.validsize = validsize
+        self.partsize = partsize
+        self.trainfolderpath = trainfolderpath
+        self.testfolderpath = testfolderpath
+
+        cat_seq = self.npy_rng.permutation(12500)
+        dog_seq = self.npy_rng.permutation(12500)
+
+        self.traincat = cat_seq[:(12500 - validsize / 2)]
+        self.validcat = cat_seq[(12500 - validsize / 2):]
+
+        self.traindog = dog_seq[:(12500 - validsize / 2)]
+        self.validdog = dog_seq[(12500 - validsize / 2):]
+
+        self.test_seq = numpy.arange(12500)+1
+        
+        self.reset_generators() 
+
+    def reset_generators(self):
+        self.train_ptr = 0  # a pointer indicating which part of iterant to generate.
+        self.valid_ptr = 0
+        self.test_ptr = 0
+
+    def _read_files(self, folderpath, yield_set):
+        current_dir = os.getcwd()
+        os.chdir(folderpath)
+        img_list = [None, ] * len(yield_set)
+        for i in xrange(len(yield_set)):
+            img_list[i] = imread(yield_set[i])
+        os.chdir(current_dir)
+        return tuple(img_list)
+
+    def train_generator(self):
+        """A generator for training set."""
+        if self.train_ptr < (12500 - self.validsize / 2):
+            yieldsize = min(self.partsize, (12500 - self.validsize / 2 - self.train_ptr) * 2)
+            yield_set = [None for _ in range(yieldsize)]
+            yield_truth = numpy.asarray(
+                [0, ] * (yieldsize/2) + [1, ] * (yieldsize/2))
+            
+            # generate corresponding file names
+            for i in xrange(yieldsize / 2):
+                yield_set[i] = 'cat.' + str(self.traincat[self.train_ptr + i]) + '.jpg'
+                yield_set[yieldsize / 2 + i] = \
+                               'dog.' + str(self.traindog[self.train_ptr + i]) + '.jpg'
+            yield_set = numpy.asarray(yield_set)
+
+            # permutation
+            permutation_ind = self.npy_rng.permutation(yieldsize)
+            yield_set = yield_set[permutation_ind]
+            yield_truth = yield_truth[permutation_ind]
+
+            # read the files iteratively
+            yield_set = self._read_files(self.trainfolderpath, yield_set)
+
+            # yield
+            yield [yield_set, yield_truth]
+            self.train_ptr += self.partsize / 2
+
+    def valid_generator(self):
+        if self.valid_ptr < (self.validsize / 2):
+            yieldsize = min(self.partsize, (self.validsize / 2 - self.valid_ptr) * 2)
+            yield_set = [None for _ in range(yieldsize)]
+            yield_truth = numpy.asarray(
+                [0, ] * (yieldsize/2) + [1, ] * (yieldsize/2))
+            
+            # generate corresponding file names
+            for i in xrange(yieldsize / 2):
+                yield_set[i] = 'cat.' + str(self.validcat[self.valid_ptr + i]) + '.jpg'
+                yield_set[yieldsize / 2 + i] = \
+                               'dog.' + str(self.validdog[self.valid_ptr + i]) + '.jpg'
+            yield_set = numpy.asarray(yield_set)
+
+            # permutation
+            permutation_ind = self.npy_rng.permutation(yieldsize)
+            yield_set = yield_set[permutation_ind]
+            yield_truth = yield_truth[permutation_ind]
+
+            # read the files iteratively
+            self._read_files(self.trainfolderpath, yield_set)
+
+            # yield
+            yield [yield_set, yield_truth]
+            self.valid_ptr += self.partsize / 2
+
+    def test_generator(self):
+        if self.test_ptr < 12500:
+            yieldsize = min(self.partsize, (12500 - self.test_ptr))
+            yield_set = [None for _ in range(yieldsize)]
+            for i in xrange(yieldsize):
+                yield_set[i] = str(self.test_seq[self.test_ptr + i]) + '.jpg'
+            yield_set = numpy.asarray(yield_set)
+
+            # read the files iteratively
+            self._read_files(self.testfolderpath, yield_set)
+
+            # yield
+            yield yield_set
+            self.test_ptr += self.partsize
+
+
+"""
 def convert_to_onehot(truth_data):
-    """
+    """"""
     truth_data is a numpy array.
-    """
+    """"""
     labels = numpy.unique(truth_data)
     data = numpy.zeros((truth_data.shape[0], len(labels)))
     data[numpy.arange(truth_data.shape[0]), 
          truth_data.reshape(truth_data.shape[0])] = 1
     return data, labels
+"""
 
-def load_mnist(file_path='/data/lisa/data/mnist.pkl.gz'):
-    import gzip
-    import cPickle
-    f = gzip.open('/data/lisa/data/mnist.pkl.gz', 'rb')
-    train_set, valid_set, test_set = cPickle.load(f)
-    f.close()
-    return train_set, valid_set, test_set

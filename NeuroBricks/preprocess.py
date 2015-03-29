@@ -45,6 +45,72 @@ class PCA(object):
     """
     A theano based PCA capable of using GPU.
     """
+    def _centralize_part(self, data_part):
+        """
+        Centralize the passed data_part, and store the partial mean in the
+        self.mean variable. Since it changes the value of data_part, it is
+        better to pass a copy of that.
+
+        If you don\'t centralize the dataset, then you are still going to get
+        perfect reconstruction from the forward/backward mapping matrices, but
+        1. the eigenvalues you get will no longer match the variance of each
+           principle components, 
+        2. the \'principle component\' you get will no longer match the
+           projection of largest variance, and
+        3. the output will not be centered at the initial data center, neither
+           at the origin too. However, the shape of the data scatter would
+           still remain intact.
+        It just rotates the data by an unwanted angle and shifts the data by an
+        unexpected vector.
+
+        Parameters
+        ----------------------
+        data_part : numpy.ndarray
+        """
+        np_ncases = numpy.array([data_part.shape[0]]).astype(theano.config.floatX)
+        fun_batchmean = theano.function(
+            inputs=[data_batch], outputs=T.sum(data_batch / np_ncases, axis=0)
+        )
+        if verbose:     print "Centralizing data, %d dots to punch:" % nbatches,
+        self.mean = numpy.zeros(self.ndim, dtype=theano.config.floatX)
+        for bidx in range(nbatches):
+            if verbose:
+                print ".",
+                sys.stdout.flush()
+            start = bidx * batch_size
+            end = min((bidx + 1) * batch_size, ncases)
+            self.mean += fun_batchmean(data[start:end, :])
+        data -= self.mean
+        if verbose:     print "Done."
+    
+    def _compute_cov_part(self, ):
+        # compute convariance matrix
+        covmat = theano.shared(
+            value=numpy.zeros((self.ndim, self.ndim),
+                              dtype=theano.config.floatX),
+            name='covmat',
+            borrow=True
+        )
+        fun_update_covmat = theano.function(
+            inputs=[data_batch],
+            outputs=[],
+            updates={covmat: covmat + \
+                             T.dot(data_batch.T, data_batch) / np_ncases}
+        )
+        if verbose:
+            print "Computing covariance, %d dots to punch:" % nbatches,
+        for bidx in range(nbatches):
+            if verbose:
+                print ".",
+                sys.stdout.flush()
+            start = bidx * batch_size
+            end = min((bidx + 1) * batch_size, ncases)
+            fun_update_covmat(data[start:end, :])
+        if verbose:     print "Done."
+        self.covmat = covmat.get_value()
+
+
+
     def fit(self, data, retain=None, batch_size=10000, verbose=True,
             whiten=False):
         """
@@ -148,7 +214,9 @@ class PCA(object):
             print "Number of selected PCs: %d, ratio of retained variance: %f"%\
                 (self.retain, self.variance_fracs[self.retain-1])
         self._build_layers(whiten)
-    
+   
+    def fit_partwise(self, ):
+
     def _build_layers(self, whiten):        
         # decide if or not to whiten data
         if whiten:
