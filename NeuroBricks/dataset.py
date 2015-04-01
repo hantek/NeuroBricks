@@ -106,7 +106,8 @@ class CatsnDogs(object):
         self.reset_generators() 
 
     def reset_generators(self):
-        self.train_ptr = 0  # a pointer indicating which part of iterant to generate.
+        # pointers indicating which part of iterant to generate.
+        self.train_ptr = 0
         self.valid_ptr = 0
         self.test_ptr = 0
 
@@ -121,7 +122,7 @@ class CatsnDogs(object):
 
     def train_generator(self):
         """A generator for training set."""
-        if self.train_ptr < (12500 - self.validsize / 2):
+        while self.train_ptr < (12500 - self.validsize / 2):
             yieldsize = min(self.partsize, (12500 - self.validsize / 2 - self.train_ptr) * 2)
             yield_set = [None for _ in range(yieldsize)]
             yield_truth = numpy.asarray(
@@ -143,11 +144,11 @@ class CatsnDogs(object):
             yield_set = self._read_files(self.trainfolderpath, yield_set)
 
             # yield
-            yield [yield_set, yield_truth]
+            yield (yield_set, yield_truth)
             self.train_ptr += self.partsize / 2
 
     def valid_generator(self):
-        if self.valid_ptr < (self.validsize / 2):
+        while self.valid_ptr < (self.validsize / 2):
             yieldsize = min(self.partsize, (self.validsize / 2 - self.valid_ptr) * 2)
             yield_set = [None for _ in range(yieldsize)]
             yield_truth = numpy.asarray(
@@ -169,11 +170,11 @@ class CatsnDogs(object):
             self._read_files(self.trainfolderpath, yield_set)
 
             # yield
-            yield [yield_set, yield_truth]
+            yield (yield_set, yield_truth)
             self.valid_ptr += self.partsize / 2
 
     def test_generator(self):
-        if self.test_ptr < 12500:
+        while self.test_ptr < 12500:
             yieldsize = min(self.partsize, (12500 - self.test_ptr))
             yield_set = [None for _ in range(yieldsize)]
             for i in xrange(yieldsize):

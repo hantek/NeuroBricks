@@ -203,6 +203,7 @@ class Layer(object):
                 theano.compile.function_module.Function
             ), "map_function has to be a theano function with no input."
             M = map_function()
+        # The following assertion causes problems when M is generated in a conv layer. Consider rewrite it.
         assert M.shape[0] == self.n_out, "Wrong M row numbers."
         if npatch == None:
             npatch = self.n_out
@@ -385,10 +386,24 @@ class StackedLayer(Layer):
             if not previous_layer:  # First layer
                 layer_model.varin = self.varin
             else:
-                assert previous_layer.n_out == layer_model.n_in, \
-                    "Stacked layer should match the input and output " + \
-                    "dimension with each other."
-                layer_model.varin = previous_layer.output()
+                left_is_tuple = isinstance(previous_layer.n_out, tuple)
+                right_is_tuple = isinstance(layer_model.n_in, tuple)
+                info = "Stacked layer should match the input and output" + \
+                       "dimension with each other."
+                # two conv layers or two FC layers
+                if (left_is_tuple and right_is_tuple) or \
+                   ((not left_is_tuple) and (not right_is_tuple)):
+                    assert previous_layer.n_out == layer_model.n_in, info
+                    layer_model.varin = previous_layer.output()
+                elif left_is_tuple:  # CONV-FC
+                    assert numpy.prod(previous_layer.n_out[1:]) == \
+                        layer_model.n_in, info
+                    layer_model.varin=previous_layer.output().flatten(2)
+                elif right_is_tuple:  # FC-CONV
+                    assert numpy.prod(layer_model.n_in) == \
+                        previous_layer.n_out[1:], info
+                    layer_model.varin = \
+                        previous_layer.output().reshape(previous_layer.n_out)
             previous_layer = layer_model
             self.params += layer_model.params
         self.models_stack = models_stack
@@ -765,7 +780,7 @@ class Conv2DLayer(Layer):
 
         if not init_w:
             numparam_per_filter = numpy.prod(filter_shape[1:])
-            w = _weight_initialization()
+            w = self._weight_initialization()
             init_w = theano.shared(value=w, name='w_conv2d', borrow=True)
         # else:
         #     TODO. The following assetion is complaining about an attribute
@@ -782,7 +797,7 @@ class Conv2DLayer(Layer):
             )
         else:
             assert init_b.get_value().shape == (filter_shape[0],)
-        self.b = init_b.dimshuffle('x', 0, 'x', 'x')
+        self.b = init_b
 
         self.params = [self.w, self.b]
         
@@ -799,7 +814,7 @@ class Conv2DLayer(Layer):
         return conv.conv2d(
             input=self.varin, filters=self.w,
             filter_shape=self.filter_shape, image_shape=self.n_in
-        ) + self.b
+        ) + self.b.dimshuffle('x', 0, 'x', 'x')
 
     def output(self):
         raise NotImplementedError("Must be implemented by subclass.")
@@ -809,11 +824,16 @@ class Conv2DLayer(Layer):
 
 
 class ReluConv2DLayer(Conv2DLayer):
-    # def _weight_initialization(self):
-    # we should adjust this scale specifically for Relu.  
+    def _weight_initialization(self):
+        numparam_per_filter = numpy.prod(self.filter_shape[1:])
+        w = numpy.asarray(self.npy_rng.uniform(
+            low = - 0.1 * numpy.sqrt(3. / numparam_per_filter),
+            high = 0.1 * numpy.sqrt(3. / numparam_per_filter),
+            size=self.filter_shape), dtype=theano.config.floatX)
+        return w
 
     def output(self):
-        T.maximum(self.fanin(), 0.)
+        return T.maximum(self.fanin(), 0.)
 
     def activ_prime(self):
         raise NotImplementedError("Not implemented yet...")
