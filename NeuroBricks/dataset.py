@@ -122,11 +122,13 @@ class CatsnDogs(object):
 
     def train_generator(self):
         """A generator for training set."""
-        while self.train_ptr < (12500 - self.validsize / 2):
-            yieldsize = min(self.partsize, (12500 - self.validsize / 2 - self.train_ptr) * 2)
+        while self.train_ptr < len(self.traincat):
+            # if it is the last part, it might be smaller than previous ones.
+            yieldsize = min(self.partsize,
+                            (len(self.traincat) - self.train_ptr) * 2)
             yield_set = [None for _ in range(yieldsize)]
             yield_truth = numpy.asarray(
-                [0, ] * (yieldsize/2) + [1, ] * (yieldsize/2))
+                [0, ] * (yieldsize / 2) + [1, ] * (yieldsize / 2))
             
             # generate corresponding file names
             for i in xrange(yieldsize / 2):
@@ -148,12 +150,12 @@ class CatsnDogs(object):
             self.train_ptr += self.partsize / 2
 
     def valid_generator(self):
-        while self.valid_ptr < (self.validsize / 2):
-            yieldsize = min(self.partsize, (self.validsize / 2 - self.valid_ptr) * 2)
+        while self.valid_ptr < len(self.validcat):
+            yieldsize = min(self.partsize, (len(self.validcat) - self.valid_ptr) * 2)
             yield_set = [None for _ in range(yieldsize)]
             yield_truth = numpy.asarray(
-                [0, ] * (yieldsize/2) + [1, ] * (yieldsize/2))
-            
+                [0, ] * (yieldsize / 2) + [1, ] * (yieldsize / 2))
+
             # generate corresponding file names
             for i in xrange(yieldsize / 2):
                 yield_set[i] = 'cat.' + str(self.validcat[self.valid_ptr + i]) + '.jpg'
@@ -167,7 +169,7 @@ class CatsnDogs(object):
             yield_truth = yield_truth[permutation_ind]
 
             # read the files iteratively
-            self._read_files(self.trainfolderpath, yield_set)
+            yield_set = self._read_files(self.trainfolderpath, yield_set)
 
             # yield
             yield (yield_set, yield_truth)
@@ -177,12 +179,14 @@ class CatsnDogs(object):
         while self.test_ptr < 12500:
             yieldsize = min(self.partsize, (12500 - self.test_ptr))
             yield_set = [None for _ in range(yieldsize)]
+
+            # generate corresponding file names
             for i in xrange(yieldsize):
                 yield_set[i] = str(self.test_seq[self.test_ptr + i]) + '.jpg'
             yield_set = numpy.asarray(yield_set)
 
             # read the files iteratively
-            self._read_files(self.testfolderpath, yield_set)
+            yield_set = self._read_files(self.testfolderpath, yield_set)
 
             # yield
             yield yield_set

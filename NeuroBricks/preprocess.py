@@ -5,6 +5,8 @@ import theano
 import theano.tensor as T
 from layer import Layer, LinearLayer
 
+import pdb
+
 
 class NeuralizedPCALayer(Layer):
     def __init__(self, n_in, n_out, init_w, init_bvis,
@@ -183,7 +185,7 @@ class PCA(object):
             print "Centralizing data..."
         data_variable = T.matrix('data_variable')
         np_ncases = numpy.array([ncases]).astype(theano.config.floatX)
-        fun_batchmean = theano.function(
+        fun_partmean = theano.function(
             inputs=[data_variable],
             outputs=T.sum(data_variable / np_ncases, axis=0)
         )
