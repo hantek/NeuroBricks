@@ -5,6 +5,8 @@ import theano
 import theano.tensor as T
 from layer import Layer, LinearLayer
 
+import pdb
+
 
 class NeuralizedPCALayer(Layer):
     def __init__(self, n_in, n_out, init_w, init_bvis,
@@ -45,24 +47,11 @@ class PCA(object):
     """
     A theano based PCA capable of using GPU.
     """
-    def fit(self, data, retain=None, batch_size=10000, verbose=True,
-            whiten=False):
+    def _compute_mean_part(self, data_part, fun_partmean):
         """
-        Part of the code is adapted from Roland Memisevic's code.
-        fit() establishes 2 LinearLayer objects: PCAForwardLayer and
-        PCABackwardLayer. They define how the data is mapped after the PCA
-        mapping is learned.
-        """
-        self.retain = retain
-        assert isinstance(data, numpy.ndarray), \
-               "data has to be a numpy ndarray."
-        data = data.copy().astype(theano.config.floatX)
-        ncases, self.ndim = data.shape
-        nbatches = (ncases + batch_size - 1) / batch_size
-        data_batch = T.matrix('data_batch')
-        
-        # centralizing data
-        """
+        Compyte the mean of passed data_part, and store the partial mean in the
+        self.mean variable.
+
         If you don\'t centralize the dataset, then you are still going to get
         perfect reconstruction from the forward/backward mapping matrices, but
         1. the eigenvalues you get will no longer match the variance of each
@@ -74,24 +63,61 @@ class PCA(object):
            still remain intact.
         It just rotates the data by an unwanted angle and shifts the data by an
         unexpected vector.
+
+        Parameters
+        ----------------------
+        data_part : numpy.ndarray
+
+        fun_partmean : theano.function
+
         """
+        self.mean += fun_partmean(data_part)
+    
+    def _compute_cov_part(self, data_part, fun_update_covmat):
+        """
+        Compute convariance matrix for a data part. 
+        
+        Parameters
+        ----------------------
+        data_part : numpy.ndarray
+
+        fun_update_covmat : theano.function
+
+        """
+        fun_update_covmat(data_part)
+
+    def fit(self, data, retain=None, verbose=True, whiten=False):
+        """
+        Part of the code is adapted from Roland Memisevic's code.
+
+        fit() deals with small datasets, i.e., those datasets that can be
+        loaded into memory at once. It establishes 2 LinearLayer objects:
+        PCAForwardLayer and PCABackwardLayer. They define how the data is
+        mapped after the PCA mapping is learned.
+        """
+        self.retain = retain
+        assert isinstance(data, numpy.ndarray), \
+               "data has to be a numpy ndarray."
+        data = data.copy().astype(theano.config.floatX)
+        ncases, self.ndim = data.shape
+        
+        # centralizing data
+        if verbose:
+            print "Centralizing data..."
+        data_variable = T.matrix('data_variable')
         np_ncases = numpy.array([ncases]).astype(theano.config.floatX)
-        fun_batchmean = theano.function(
-            inputs=[data_batch], outputs=T.sum(data_batch / np_ncases, axis=0)
+        fun_partmean = theano.function(
+            inputs=[data_variable],
+            outputs=T.sum(data_variable / np_ncases, axis=0)
         )
-        if verbose:     print "Centralizing data, %d dots to punch:" % nbatches,
         self.mean = numpy.zeros(self.ndim, dtype=theano.config.floatX)
-        for bidx in range(nbatches):
-            if verbose:
-                print ".",
-                sys.stdout.flush()
-            start = bidx * batch_size
-            end = min((bidx + 1) * batch_size, ncases)
-            self.mean += fun_batchmean(data[start:end, :])
+        self._compute_mean_part(data, fun_partmean)
         data -= self.mean
         if verbose:     print "Done."
         
         # compute convariance matrix
+        if verbose:
+            print "Computing covariance..."
         covmat = theano.shared(
             value=numpy.zeros((self.ndim, self.ndim),
                               dtype=theano.config.floatX),
@@ -99,22 +125,14 @@ class PCA(object):
             borrow=True
         )
         fun_update_covmat = theano.function(
-            inputs=[data_batch],
+            inputs=[data_variable],
             outputs=[],
             updates={covmat: covmat + \
-                             T.dot(data_batch.T, data_batch) / np_ncases}
+                             T.dot(data_variable.T, data_variable) / np_ncases}
         )
-        if verbose:
-            print "Computing covariance, %d dots to punch:" % nbatches,
-        for bidx in range(nbatches):
-            if verbose:
-                print ".",
-                sys.stdout.flush()
-            start = bidx * batch_size
-            end = min((bidx + 1) * batch_size, ncases)
-            fun_update_covmat(data[start:end, :])
-        if verbose:     print "Done."
+        self._compute_cov_part(data, fun_update_covmat)
         self.covmat = covmat.get_value()
+        if verbose:     print "Done."
 
         # compute eigenvalue and eigenvector
         if verbose:     print "Eigen-decomposition...",; sys.stdout.flush()
@@ -148,7 +166,98 @@ class PCA(object):
             print "Number of selected PCs: %d, ratio of retained variance: %f"%\
                 (self.retain, self.variance_fracs[self.retain-1])
         self._build_layers(whiten)
-    
+   
+    def fit_partwise(self, data_generator, ncases, ndim,
+                     retain=None, verbose=True, whiten=False):
+        """
+        fit_partwise() is for computing PCA for large datasets. the data part
+        is generated by a generator, and at each iteration the generated data
+        should be in the form of a single numpy.ndarray, with 2-d structure. 
+        The method establishes 2 LinearLayer objects: PCAForwardLayer and
+        PCABackwardLayer. They define how the data is mapped after the PCA
+        mapping is learned.
+        """
+        self.retain = retain
+        self.ndim = ndim
+
+        # centralizing data
+        if verbose:
+            print "Centralizing data..."
+        data_variable = T.matrix('data_variable')
+        np_ncases = numpy.array([ncases]).astype(theano.config.floatX)
+        fun_partmean = theano.function(
+            inputs=[data_variable],
+            outputs=T.sum(data_variable / np_ncases, axis=0)
+        )
+        self.mean = numpy.zeros(self.ndim, dtype=theano.config.floatX)
+        for data_part in data_generator:
+            assert isinstance(data_part, numpy.ndarray), \
+                "data_generator has to be a generator of numpy.ndarray."
+            data_part = data_part.astype(theano.config.floatX)
+            _, self.ndim = data_part.shape
+            self._compute_mean_part(data_part, fun_partmean)
+            if verbose:
+                print ".",
+                sys.stdout.flush()
+        if verbose:     print "Done."
+        
+        # compute convariance matrix
+        if verbose:
+            print "Computing covariance..."
+        covmat = theano.shared(
+            value=numpy.zeros((self.ndim, self.ndim),
+                              dtype=theano.config.floatX),
+            name='covmat',
+            borrow=True
+        )
+        fun_update_covmat = theano.function(
+            inputs=[data_variable],
+            outputs=[],
+            updates={covmat: covmat + \
+                             T.dot(data_variable.T, data_variable) / np_ncases}
+        )
+        for data_part in data_generator:
+            data_part = data_part.astype(theano.config.floatX) - self.mean
+            self._compute_cov_part(data_part, fun_update_covmat)
+            if verbose:
+                print ".",
+                sys.stdout.flush()
+        self.covmat = covmat.get_value()
+        if verbose:     print "Done."
+
+        # compute eigenvalue and eigenvector
+        if verbose:     print "Eigen-decomposition...",; sys.stdout.flush()
+        # u should be real valued vector, which stands for the variace of data
+        # at each PC. v should be a real valued orthogonal matrix.
+        u, v_unsorted = numpy.linalg.eigh(self.covmat)
+        self.v = v_unsorted[:, numpy.argsort(u)[::-1]]
+        u.sort()
+        u = u[::-1]
+        # throw away some eigenvalues for numerical stability
+        self.stds = numpy.sqrt(u[u > 0.])
+        self.variance_fracs = (self.stds ** 2).cumsum() / (self.stds ** 2).sum()
+        self.maxPCs = self.stds.shape[0]
+        if verbose:     print "Done. Maximum stable PCs: %d" % self.maxPCs 
+        
+        # decide number of principle components.
+        error_info = "Wrong \"retain\" value. Should be " + \
+                     "a real number within the interval of (0, 1), " + \
+                     "an integer in (0, maxPCs], None, or \'mle\'."
+        if self.retain == None:
+            self.retain = self.maxPCs
+        elif self.retain == 'mle':
+            raise NotImplementedError("Adaptive dimension matching," + \
+                                      "not implemented yet...")
+        elif isinstance(self.retain, int):
+            assert (self.retain > 0 and self.retain <= self.maxPCs), error_info
+        elif isinstance(self.retain, float):
+            assert (self.retain > 0 and self.retain < 1), error_info
+            self.retain = numpy.sum(self.variance_fracs < self.retain) + 1
+        if verbose:
+            print "Number of selected PCs: %d, ratio of retained variance: %f"%\
+                (self.retain, self.variance_fracs[self.retain-1])
+        self._build_layers(whiten)
+ 
     def _build_layers(self, whiten):        
         # decide if or not to whiten data
         if whiten:

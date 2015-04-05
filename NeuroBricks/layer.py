@@ -148,7 +148,7 @@ class Layer(object):
         else:
             plt.savefig(filename)
 
-    def draw_weight(self, patch_shape, map_function=None, npatch=None,
+    def draw_weight(self, patch_shape=None, map_function=None, npatch=None,
                     border=1, bordercolor=(0.0, 0.0, 0.0),
                     verbose=True, filename='draw_layerw.png',
                     *imshow_args, **imshow_keyargs):
@@ -196,27 +196,46 @@ class Layer(object):
         if map_function == None:
             if not hasattr(self, 'get_w'):
                 self.get_w = theano.function([], self.w.T.T)
-            M = self.get_w().T
+            M = self.get_w()
+            if len(M.shape) == 2:
+                M = M.T
         else:
             assert isinstance(
                 map_function,
                 theano.compile.function_module.Function
             ), "map_function has to be a theano function with no input."
             M = map_function()
-        assert M.shape[0] == self.n_out, "Wrong M row numbers."
+
+        if len(M.shape) == 2:  # FC weight matrix
+            assert M.shape[0] == self.n_out, (
+                "Wrong M row numbers. Should be %d " % self.n_out + \
+                "but got %d." % M.shape[0])
+            max_patchs = self.n_out
+        elif len(M.shape) == 4:  # ConvNet filter
+            # This will still cause problem for deeper Conv layers.
+            assert patch_shape == None, (
+                "You don't need to specify a patch_shape for ConvNet layers.")
+            patch_shape = (M.shape[2], M.shape[3], M.shape[1])
+            max_patchs = M.shape[0]
+            M = numpy.swapaxes(M, 1, 3)
+            M = numpy.swapaxes(M, 2, 3)
+
         if npatch == None:
-            npatch = self.n_out
+            npatch = max_patchs
         else:
-            assert npatch <= self.n_out, "Too large npatch size."
+            assert npatch <= max_patchs, ("Too large npatch size. Maximum "
+                                          "allowed value %d " % max_patchs + \
+                                          "but got %d." % npatch)
             if npatch != len(self.patch_ind):
                 if not hasattr(self, 'npy_rng'):
                     self.npy_rng = numpy.random.RandomState(123)
-                self.patch_ind = self.npy_rng.permutation(self.n_out)[:npatch]
+                self.patch_ind = self.npy_rng.permutation(max_patchs)[:npatch]
             M = M[self.patch_ind, :]
-        
+
         bordercolor = numpy.array(bordercolor)[None, None, :]
         M = M.copy()
 
+        assert patch_shape is not None, ("Need a patch_shape for this case.")
         for i in range(M.shape[0]):
             M[i] -= M[i].flatten().min()
             M[i] /= M[i].flatten().max()
@@ -369,12 +388,12 @@ class StackedLayer(Layer):
         directly calling the constructor of this class, passing a list with
         elements of StackedLayer objects.
         """
-        assert len(models_stack) >= 1, "Warning: A Stacked Layer of empty " + \
-                                       "models is trivial."
+        assert len(models_stack) >= 1, ("Warning: A Stacked Layer of empty "
+                                        "models is trivial.")
         for layer in models_stack:
-            assert isinstance(layer, Layer), \
-                "All models in the models_stack list should be some " + \
-                "subclass of Layer"
+            assert isinstance(layer, Layer), (
+                "All models in the models_stack list should be some "
+                "subclass of Layer")
         super(StackedLayer, self).__init__(
             n_in=models_stack[0].n_in, n_out=models_stack[-1].n_out,
             varin=varin
@@ -385,10 +404,26 @@ class StackedLayer(Layer):
             if not previous_layer:  # First layer
                 layer_model.varin = self.varin
             else:
-                assert previous_layer.n_out == layer_model.n_in, \
-                    "Stacked layer should match the input and output " + \
-                    "dimension with each other."
-                layer_model.varin = previous_layer.output()
+                left_is_tuple = isinstance(previous_layer.n_out, tuple)
+                right_is_tuple = isinstance(layer_model.n_in, tuple)
+                info = ("Dimension mismatch detected when stacking two "
+                        "layers.\nformer layer:\n" + \
+                        previous_layer._print_str() + \
+                        "\nlatter layer:\n" + layer_model._print_str() + "\n")
+                # two conv layers or two FC layers
+                if (left_is_tuple and right_is_tuple) or \
+                   ((not left_is_tuple) and (not right_is_tuple)):
+                    assert previous_layer.n_out == layer_model.n_in, info
+                    layer_model.varin = previous_layer.output()
+                elif left_is_tuple:  # CONV-FC
+                    assert numpy.prod(previous_layer.n_out[1:]) == \
+                        layer_model.n_in, info
+                    layer_model.varin=previous_layer.output().flatten(2)
+                elif right_is_tuple:  # FC-CONV
+                    assert numpy.prod(layer_model.n_in) == \
+                        previous_layer.n_out[1:], info
+                    layer_model.varin = \
+                        previous_layer.output().reshape(previous_layer.n_out)
             previous_layer = layer_model
             self.params += layer_model.params
         self.models_stack = models_stack
@@ -421,9 +456,9 @@ class StackedLayer(Layer):
         return len(self.models_stack)
 
     def print_layer(self):
-        print "-" * 35
+        print "-" * 40
         print "a stacked model with %d layers:" % self.num_layers()
-        print "-" * 35
+        print "-" * 40
 
         previous_layer_string = None
         repeat_count = 0
@@ -584,8 +619,8 @@ class ReluLayer(Layer):
 
         if not init_w:
             w = numpy.asarray(npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (n_in + n_out)),
-                high = 4 * numpy.sqrt(6. / (n_in + n_out)),
+                low = -numpy.sqrt(3. / n_in),
+                high = numpy.sqrt(3. / n_in),
                 size=(n_in, n_out)), dtype=theano.config.floatX)
             init_w = theano.shared(value=w, name='w_relu', borrow=True)
         # else:
@@ -765,7 +800,7 @@ class Conv2DLayer(Layer):
 
         if not init_w:
             numparam_per_filter = numpy.prod(filter_shape[1:])
-            w = _weight_initialization()
+            w = self._weight_initialization()
             init_w = theano.shared(value=w, name='w_conv2d', borrow=True)
         # else:
         #     TODO. The following assetion is complaining about an attribute
@@ -782,7 +817,7 @@ class Conv2DLayer(Layer):
             )
         else:
             assert init_b.get_value().shape == (filter_shape[0],)
-        self.b = init_b.dimshuffle('x', 0, 'x', 'x')
+        self.b = init_b
 
         self.params = [self.w, self.b]
         
@@ -799,7 +834,7 @@ class Conv2DLayer(Layer):
         return conv.conv2d(
             input=self.varin, filters=self.w,
             filter_shape=self.filter_shape, image_shape=self.n_in
-        ) + self.b
+        ) + self.b.dimshuffle('x', 0, 'x', 'x')
 
     def output(self):
         raise NotImplementedError("Must be implemented by subclass.")
@@ -809,11 +844,23 @@ class Conv2DLayer(Layer):
 
 
 class ReluConv2DLayer(Conv2DLayer):
-    # def _weight_initialization(self):
-    # we should adjust this scale specifically for Relu.  
+    def _weight_initialization(self):
+        """
+        if there is no 0.1 multiplier, then the variance of each pre-hidden is
+        roughly 1.0, which is desired by the principle indicated by batch
+        normalization. Adding 0.1 to ensure the initial weights to be
+        sufficiently small, which is found to be more efficient in converging
+        during the first few epochs. 
+        """
+        numparam_per_filter = numpy.prod(self.filter_shape[1:])
+        w = numpy.asarray(self.npy_rng.uniform(
+            low = - 0.1 * numpy.sqrt(3. / numparam_per_filter),
+            high = 0.1 * numpy.sqrt(3. / numparam_per_filter),
+            size=self.filter_shape), dtype=theano.config.floatX)
+        return w
 
     def output(self):
-        T.maximum(self.fanin(), 0.)
+        return T.maximum(self.fanin(), 0.)
 
     def activ_prime(self):
         raise NotImplementedError("Not implemented yet...")
