@@ -40,17 +40,40 @@ import cPickle
 import numpy
 from scipy.misc import imread
 
-import pdb
 
+class MNIST(object):
+    def __init__(self, file_path='/data/lisa/data/mnist.pkl.gz'):
+        """
+        MNIST is too tiny to have a iterator structure.
+        """
+        f = gzip.open('/data/lisa/data/mnist.pkl.gz', 'rb')
+        self.train_set, self.valid_set, self.test_set = cPickle.load(f)
+        f.close()
+    
+    def get_train_set(self, include_valid=False):
+        if include_valid:
+            big_train = numpy.concatenate(
+                self.train_set[0], self.valid_set[0], axis=0
+            )
+            big_truth = numpy.concatenate(self.train_set[1], self.valid_set[1])
+            return (big_train, big_truth)
+        elif:
+            return self.train_set
+    
+    def get_valid_set(self):
+        return self.valid_set
 
-def MNIST(file_path='/data/lisa/data/mnist.pkl.gz'):
-    """
-    MNIST is too tiny to have a iterator structure. A function is enough for it.
-    """
-    f = gzip.open('/data/lisa/data/mnist.pkl.gz', 'rb')
-    train_set, valid_set, test_set = cPickle.load(f)
-    f.close()
-    return train_set, valid_set, test_set
+    def get_test_set(self):
+        return self.test_set
+
+    def get_digit(self, digit=3):
+        if digit > 9 or digit < 0:
+            raise ValueError("digit has to be an integer in [0, 9].")
+        big_train = self.get_train_set(include_valid=True)
+        ind = (big_train[1] == digit)
+        digit_data = big_train[0][ind]
+        digit_truth = big_train[1][ind]
+        return (digit_data, digit_truth) 
 
 
 class CatsnDogs(object):

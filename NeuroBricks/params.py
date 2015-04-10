@@ -5,6 +5,11 @@ els and saving/loading parameters with files.
 TODO:
 Consider to use pkl and tar.gz to store param list of numpy.ndarrays.
 Deal with params_private problem.
+
+File format .pkl are not stable for 64 bit machines in python 2.7, and that
+influences .npz. The most stable way is to use the simplest .npy file. Consider
+combining it with tar.gz?
+
 """
 import numpy
 import theano

@@ -189,6 +189,7 @@ class LinearRegression(Classifier):
 
     def cost(self):
         # TODO not known
+        raise NotImplementedError("ERROR")
         return str("ERROR")
     
     def weightdecay(self, weightdecay=1e-3):

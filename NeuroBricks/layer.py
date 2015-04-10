@@ -651,6 +651,49 @@ class ReluLayer(Layer):
         return (self.fanin() > 0.) * 1.
 
 
+class PReluLayer(Layer):
+    def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
+                 npy_rng=None):
+        super(PReluLayer, self).__init__(n_in, n_out, varin=varin)
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+
+        if not init_w:
+            w = numpy.asarray(npy_rng.uniform(
+                low = -numpy.sqrt(3. / n_in),
+                high = numpy.sqrt(3. / n_in),
+                size=(n_in, n_out)), dtype=theano.config.floatX)
+            init_w = theano.shared(value=w, name='w_relu', borrow=True)
+        self.w = init_w
+
+        if not init_b:
+            init_b = theano.shared(value=numpy.zeros(
+                                       n_out,
+                                       dtype=theano.config.floatX),
+                                   name='b_relu', borrow=True)
+        else:
+            assert init_b.get_value().shape == (n_out,)
+        self.b = init_b
+
+        self.lk = theano.shared(
+            value=numpy.float32(0.).astype(theano.config.floatX),
+            name='leak_rate'
+        )
+        
+        self.params = [self.w, self.b, self.lk]
+
+    def fanin(self):
+        return T.dot(self.varin, self.w) + self.b
+
+    def output(self):
+        fanin = self.fanin()
+        return T.switch(fanin > 0., fanin, fanin * self.lk)
+
+    def activ_prime(self):
+        return T.switch(self.fanin() > 0., 1., self.lk)
+
+
 class AbsLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
@@ -777,12 +820,13 @@ class Conv2DLayer(Layer):
         npy_rng
         
         """
-        assert len(filter_shape) == 4, \
-                "filter_shape has to be a 4-D tuple ordered in this way: " + \
-                "(# filters, # input channels, # filter height, # filter width)"
-        assert len(n_in) == 4, \
-                "n_in is expected to be a 4-D tuple ordered in this way: " + \
-                "(batch size, # input channels, # input height, # input width)"
+        assert len(filter_shape) == 4, ("filter_shape has to be a 4-D tuple "
+                                        "ordered in this way: (# filters, "
+                                        "# input channels, # filter height, "
+                                        "# filter width)")
+        assert len(n_in) == 4, ("n_in is expected to be a 4-D tuple ordered "
+                                "in this way: (batch size, # input channels, "
+                                "# input height, # input width)")
         # filter_shape[1] has to be the same to n_in[1]
         n_out_calcu = (n_in[0], filter_shape[0],
                        n_in[2] - filter_shape[2] + 1,
@@ -866,6 +910,35 @@ class ReluConv2DLayer(Conv2DLayer):
         raise NotImplementedError("Not implemented yet...")
 
 
+class PReluConv2DLayer(Conv2DLayer):
+    def __init__(self, n_in, filter_shape, n_out=None, varin=None,
+                 init_w=None, init_b=None, npy_rng=None):
+        super(PReluConv2DLayer, self).__init__(
+            n_in, filter_shape, n_out=None, varin=None, init_w=None,
+            init_b=None, npy_rng=None
+        )
+        self.lk = theano.shared(
+            value=numpy.float32(0.).astype(theano.config.floatX),
+            name='leak_rate'
+        )
+        self.params.append(self.lk)
+
+    def _weight_initialization(self):
+        numparam_per_filter = numpy.prod(self.filter_shape[1:])
+        w = numpy.asarray(self.npy_rng.uniform(
+            low = - 0.1 * numpy.sqrt(3. / numparam_per_filter),
+            high = 0.1 * numpy.sqrt(3. / numparam_per_filter),
+            size=self.filter_shape), dtype=theano.config.floatX)
+        return w
+
+    def output(self):
+        fanin = self.fanin()
+        return T.switch(fanin > 0., fanin, fanin * self.lk)
+
+    def activ_prime(self):
+        raise NotImplementedError("Not implemented yet...")
+
+
 class PoolingLayer(Layer):
     def __init__(self, n_in, pool_size, ignore_border=False, n_out=None,
                  varin=None):
@@ -890,11 +963,11 @@ class PoolingLayer(Layer):
         varin
 
         """
-        assert len(n_in) == 4, \
-                "n_in is expected to be a 4-D tuple ordered in this way: " + \
-                "(batch size, # input channels, # input height, # input width)"
-        assert len(pool_size) == 2, "pool_size should be a 2-D tuple in " + \
-                                    "the form (# rows, # cols)"
+        assert len(n_in) == 4, ("n_in is expected to be a 4-D tuple ordered in "
+                                "this way: (batch size, # input channels, "
+                                "# input height, # input width)")
+        assert len(pool_size) == 2, ("pool_size should be a 2-D tuple in the "
+                                     "form (# rows, # cols)")
         n_out_calcu = (n_in[0], n_in[1], n_in[2] / pool_size[0],
                        n_in[3] / pool_size[1])
         if not n_out:

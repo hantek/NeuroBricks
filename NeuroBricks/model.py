@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 from layer import (Layer, SigmoidLayer, LinearLayer, ZerobiasLayer, ReluLayer,
                    AbsLayer)
 
-import pdb
 
 class Model(Layer):
     """
