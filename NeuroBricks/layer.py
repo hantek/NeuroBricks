@@ -456,9 +456,9 @@ class StackedLayer(Layer):
         return len(self.models_stack)
 
     def print_layer(self):
-        print "-" * 40
+        print "-" * 50
         print "a stacked model with %d layers:" % self.num_layers()
-        print "-" * 40
+        print "-" * 50
 
         previous_layer_string = None
         repeat_count = 0
@@ -480,7 +480,7 @@ class StackedLayer(Layer):
             previous_layer_string = layer_string
         if repeat_count != 0:
             print " " * (num_space - 5), "same x %d" % (repeat_count + 1)
-        print "-" * 35
+        print "-" * 50
 
 
 class SigmoidLayer(Layer):

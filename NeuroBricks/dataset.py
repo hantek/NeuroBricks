@@ -38,6 +38,7 @@ import os
 import gzip
 import cPickle
 import numpy
+import matplotlib.pyplot as plt
 from scipy.misc import imread
 
 
@@ -57,7 +58,7 @@ class MNIST(object):
             )
             big_truth = numpy.concatenate(self.train_set[1], self.valid_set[1])
             return (big_train, big_truth)
-        elif:
+        else:
             return self.train_set
     
     def get_valid_set(self):
@@ -74,6 +75,88 @@ class MNIST(object):
         digit_data = big_train[0][ind]
         digit_truth = big_train[1][ind]
         return (digit_data, digit_truth) 
+
+
+class CIFAR10(object):
+    def __init__(self,
+                 folderpath="/data/lisa/data/cifar10/cifar-10-batches-py"):
+        self.folderpath = folderpath
+
+    @classmethod
+    def unpickle(self, pklfile):
+        fo = open(pklfile, 'rb')
+        dictionary = cPickle.load(fo)
+        fo.close()
+        return dictionary
+    
+    def get_train_set(self):
+        crnt_dir = os.getcwd()
+        os.chdir(self.folderpath)
+        train_x_list = []
+        train_y_list = []
+        for i in ["1", "2", "3", "4", "5"]:
+            dicti = CIFAR10.unpickle('data_batch_' + i)
+            train_x_list.append(dicti['data'])
+            train_y_list.append(dicti['labels'])
+        train_x = numpy.concatenate(train_x_list)
+        train_y = numpy.concatenate(train_y_list)
+        train_x = train_x.reshape(
+            (50000, 32, 32, 3), order='F'
+        ).swapaxes(1, 2).reshape(
+            (50000, 3072), order='F'
+        )
+        os.chdir(crnt_dir)
+        return (train_x, train_y)
+
+    def get_test_set(self):
+        crnt_dir = os.getcwd()
+        os.chdir(self.folderpath)
+        dicti = CIFAR10.unpickle('test_batch')
+        test_x = dicti['data']
+        test_y = numpy.asarray(dicti['labels']).astype('int64')
+        test_x = test_x.reshape(
+            (10000, 32, 32, 3), order='F'
+        ).swapaxes(1, 2).reshape(
+            (10000, 3072), order='F'
+        )
+        os.chdir(crnt_dir)
+        return (test_x, test_y)
+
+
+class TinyImages(object):
+    def __init__(self, partsize=int(1e6),
+                 datapath="/data/lisatmp3/zlin/tinyimages/tiny_images.bin"):
+        self.datapath = datapath
+        self.file_handle = open(self.datapath, "rb")
+        self.partsize = partsize
+
+    @classmethod
+    def show_image(self, numpyarray):
+        plt.imshow(numpyarray.reshape(3, 32, 32).transpose(2, 1, 0))
+        plt.show()
+
+    def get_firstn(self, firstn=1):
+        f = open(self.datapath, "rb")
+        images = numpy.vstack((
+            [numpy.fromstring(
+                f.read(3072), numpy.uint8
+            ) for i in range(firstn * int(1e6))]
+        ))
+        f.close()
+        return images
+
+    def data_generator(self):
+        while self.file_handle.tell() < 243615796224:  # file size
+            imgstr = self.file_handle.read(3072 * self.partsize)
+            yield numpy.fromstring(
+                    imgstr, numpy.uint8
+                ).reshape(len(imgstr)/3072, 3072)
+
+    def reset_generator(self):
+        self.file_handle.seek(0, 0)
+
+    def __del__(self):
+        self.file_handle.close()
 
 
 class CatsnDogs(object):
@@ -214,6 +297,45 @@ class CatsnDogs(object):
             # yield
             yield yield_set
             self.test_ptr += self.partsize
+
+
+class HIGGS(object):
+    def __init__(self,
+                 data_path="/data/lisa/data/HIGGS/HIGGS_data.npy",
+                 truth_path="/data/lisa/data/HIGGS/HIGGS_truth.npy",
+                 csv_path=None):
+        """
+        The first 10,500,000 samples are training samples, while the latter
+        500,000 are test samples. The weird big number self.test_start is
+        pointing to the 10,500,001-th sample.
+        self.train_ptr = open(data_path, 'r')
+        self.test_start = 7670246491
+        self.test_ptr = open(data_path, 'r')
+        self.test_ptr.seek(self.test_start)
+        """
+        if csv_path != None:
+            file = open(csv_path, 'r')
+            self.data = numpy.zeros((11000000, 28), dtype='float32')
+            self.truth = numpy.zeros((11000000, ), dtype='int')
+
+            li = 0
+            for iline in file:
+                data = numpy.asarray(iline[:-1].split(',')).astype('float32')
+                self.data[li] = data[1:]
+                self.truth[li] = data[0].astype(int)
+                li += 1
+        else:
+            try:
+                self.data = numpy.load(data_path)
+                self.truth = numpy.load(truth_path)
+            except:
+                raise ValueError("Wrong value for data_path and truth_path.")
+
+    def get_train_set(self):
+        return (self.data[:10500000], self.truth[:10500000])
+
+    def get_test_set(self):
+        return (self.data[10500000:], self.truth[10500000:])
 
 
 """

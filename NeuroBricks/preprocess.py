@@ -9,8 +9,7 @@ import pdb
 
 
 class NeuralizedPCALayer(Layer):
-    def __init__(self, n_in, n_out, init_w, init_bvis,
-                 varin=None, npy_rng=None):
+    def __init__(self, n_in, n_out, init_w, init_bvis, varin=None):
         """
         The difference between a neuralized PCA Layer and a normal linear
         layer is the biases are on the visible side, and the weights are
@@ -20,9 +19,6 @@ class NeuralizedPCALayer(Layer):
         building block for other transformations, like ZCA.
         """
         super(NeuralizedPCALayer, self).__init__(n_in, n_out, varin=varin)
-        if not npy_rng:
-            npy_rng = numpy.random.RandomState(123)
-        assert isinstance(npy_rng, numpy.random.RandomState)
 
         if (not init_w) or (not init_bvis):
             raise TypeError("You should specify value for init_w and " + \
@@ -47,44 +43,32 @@ class PCA(object):
     """
     A theano based PCA capable of using GPU.
     """
-    def _compute_mean_part(self, data_part, fun_partmean):
-        """
-        Compyte the mean of passed data_part, and store the partial mean in the
-        self.mean variable.
+    """
+    considering to make PCA a layer object
 
-        If you don\'t centralize the dataset, then you are still going to get
-        perfect reconstruction from the forward/backward mapping matrices, but
-        1. the eigenvalues you get will no longer match the variance of each
-           principle components, 
-        2. the \'principle component\' you get will no longer match the
-           projection of largest variance, and
-        3. the output will not be centered at the initial data center, neither
-           at the origin too. However, the shape of the data scatter would
-           still remain intact.
-        It just rotates the data by an unwanted angle and shifts the data by an
-        unexpected vector.
+    def __init__(self, n_in, n_out, varin=None):
+        pca_forward_w = theano.shared(
+            value=pca_forward, name='pca_fwd', borrow=True
+        )
+        pca_forward_bvis = theano.shared(
+            value = self.mean, name='pca_fwd_bvis', borrow=True
+        )
+        self.forward_layer = NeuralizedPCALayer(
+            n_in=self.ndim, n_out=self.retain,
+            init_w=pca_forward_w, init_bvis=pca_forward_bvis
+        )
 
-        Parameters
-        ----------------------
-        data_part : numpy.ndarray
-
-        fun_partmean : theano.function
-
-        """
-        self.mean += fun_partmean(data_part)
-    
-    def _compute_cov_part(self, data_part, fun_update_covmat):
-        """
-        Compute convariance matrix for a data part. 
-        
-        Parameters
-        ----------------------
-        data_part : numpy.ndarray
-
-        fun_update_covmat : theano.function
-
-        """
-        fun_update_covmat(data_part)
+        pca_backward_w = theano.shared(
+            value=pca_backward, name='pca_bkwd', borrow=True
+        )
+        pca_backward_bvis = theano.shared(
+            value=self.mean, name='pca_bkwd_bvis', borrow=True
+        )
+        self.backward_layer = LinearLayer(
+            n_in=self.retain, n_out=self.ndim,
+            init_w=pca_backward_w, init_b=pca_backward_bvis
+        )
+    """
 
     def fit(self, data, retain=None, verbose=True, whiten=False):
         """
@@ -102,6 +86,19 @@ class PCA(object):
         ncases, self.ndim = data.shape
         
         # centralizing data
+        """
+        If you don\'t centralize the dataset, then you are still going to get
+        perfect reconstruction from the forward/backward mapping matrices, but
+        1. the eigenvalues you get will no longer match the variance of each
+           principle components, 
+        2. the \'principle component\' you get will no longer match the
+           projection of largest variance, and
+        3. the output will not be centered at the initial data center, neither
+           at the origin too. However, the shape of the data scatter would
+           still remain intact.
+        It just rotates the data by an unwanted angle and shifts the data by an
+        unexpected vector.
+        """
         if verbose:
             print "Centralizing data..."
         data_variable = T.matrix('data_variable')
@@ -111,7 +108,7 @@ class PCA(object):
             outputs=T.sum(data_variable / np_ncases, axis=0)
         )
         self.mean = numpy.zeros(self.ndim, dtype=theano.config.floatX)
-        self._compute_mean_part(data, fun_partmean)
+        self.mean += fun_partmean(data)
         data -= self.mean
         if verbose:     print "Done."
         
@@ -130,7 +127,7 @@ class PCA(object):
             updates={covmat: covmat + \
                              T.dot(data_variable.T, data_variable) / np_ncases}
         )
-        self._compute_cov_part(data, fun_update_covmat)
+        fun_update_covmat(data)
         self.covmat = covmat.get_value()
         if verbose:     print "Done."
 
@@ -167,7 +164,7 @@ class PCA(object):
                 (self.retain, self.variance_fracs[self.retain-1])
         self._build_layers(whiten)
    
-    def fit_partwise(self, data_generator, ncases, ndim,
+    def fit_partwise(self, data_genfun, data_resetfun, ncases, ndim,
                      retain=None, verbose=True, whiten=False):
         """
         fit_partwise() is for computing PCA for large datasets. the data part
@@ -190,12 +187,15 @@ class PCA(object):
             outputs=T.sum(data_variable / np_ncases, axis=0)
         )
         self.mean = numpy.zeros(self.ndim, dtype=theano.config.floatX)
+        data_resetfun()
+        data_generator = data_genfun()
         for data_part in data_generator:
-            assert isinstance(data_part, numpy.ndarray), \
-                "data_generator has to be a generator of numpy.ndarray."
+            assert isinstance(data_part, numpy.ndarray), (
+                "data_genfun has to be a generator function yielding "
+                "numpy.ndarray.")
             data_part = data_part.astype(theano.config.floatX)
             _, self.ndim = data_part.shape
-            self._compute_mean_part(data_part, fun_partmean)
+            self.mean += fun_partmean(data_part)
             if verbose:
                 print ".",
                 sys.stdout.flush()
@@ -216,9 +216,11 @@ class PCA(object):
             updates={covmat: covmat + \
                              T.dot(data_variable.T, data_variable) / np_ncases}
         )
+        data_resetfun()
+        data_generator = data_genfun()
         for data_part in data_generator:
             data_part = data_part.astype(theano.config.floatX) - self.mean
-            self._compute_cov_part(data_part, fun_update_covmat)
+            fun_update_covmat(data_part)
             if verbose:
                 print ".",
                 sys.stdout.flush()
@@ -435,14 +437,14 @@ class SubtractMean(Layer):
         return "    (" + self.__class__.__name__ + ")"
 
 
-class SubtractMeanAndNormalize(Layer):
+class SubtractMeanAndNormalizeH(Layer):
     def __init__(self, n_in, varin=None):
         """
         This is also a sample-by-sample process. For each sample, subtract its
         mean value and then normalize values *within* the sample. So the output
         for one certain sample is also fixed, no matter what other samples are.
         """
-        super(SubtractMeanAndNormalize, self).__init__(n_in, n_in, varin=varin)
+        super(SubtractMeanAndNormalizeH, self).__init__(n_in, n_in, varin=varin)
 
     def output(self):
         mean_zero = (self.varin.T - self.varin.mean(axis=1)).T
@@ -450,3 +452,39 @@ class SubtractMeanAndNormalize(Layer):
     
     def _print_str(self):
         return "    (" + self.__class__.__name__ + ")"
+
+
+class SubtractMeanAndNormalize(SubtractMeanAndNormalizeH):
+    def __init__(self, n_in, varin=None):
+        super(SubtractMeanAndNormalize, self).__init__(n_in, varin=varin)
+        print ("\nWarning: SubtractMeanAndNormalize is depreciated, use "
+               "SubtractMeanAndNormalizeH instead.\n")
+
+
+class SubtractMeanAndNormalizeV(Layer):
+    def __init__(self, n_in, varin=None):
+        """
+        This is a process which normalizes each dimension across the whole
+        dataset. So before applying it, this layer itself needs to be fitted.
+        """
+        super(SubtractMeanAndNormalizeV, self).__init__(n_in, n_in, varin=varin)
+        self.bias = theano.shared(
+            value=numpy.zeros(n_in, dtype=theano.config.floatX),
+            name='bias_meanormV',
+            borrow=True)
+        self.scale = theano.shared(
+            value=numpy.zeros(n_in, dtype=theano.config.floatX),
+            name='scale_meanormV',
+            borrow=True)
+
+    def fit(self, data):
+        self.bias.set_value(-data.mean(axis=0))
+        self.scale.set_value(data.std(axis=0))
+
+    def output(self):
+        return (self.varin + self.bias) / (self.scale + 1e-10)
+    
+    def _print_str(self):
+        return "    (" + self.__class__.__name__ + ")"
+
+

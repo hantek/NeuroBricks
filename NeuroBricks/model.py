@@ -181,10 +181,214 @@ class AutoEncoder(Model):
             plt.savefig(filename)
 
 
+class BasicAutoencoder(AutoEncoder):
+    """
+    This base class provides a basic setting (majorily weight initialization,
+    setting parameters, setting regularization terms, etc.),  for all kinds of
+    autoencoders with a 1-layer encoder and 1-layer decoder. It makes defining
+    new basic autoencoders simply. For defining a deep autoencoder, overiding
+    the encoder() and decoder() method in the AutoEncoder class would be a
+    better choice.
+    """
+    def __init__(self, n_in, n_hid, vistype, varin=None, tie=True,
+                 init_w=None, init_b=None, init_wT=None, init_bT=None,
+                 npy_rng=None):
+        super(BasicAutoencoder, self).__init__(
+            n_in, n_hid, vistype=vistype, varin=varin
+        )
+
+        self.tie = tie
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+
+        if not init_w:
+            w = self._weight_initialization()
+            init_w = theano.shared(value=w, name='w_ae', borrow=True)
+        # else:
+        #     TODO. The following assetion is complaining about an attribute
+        #     error while passing w.T to init_w. Considering using a more
+        #     robust way of assertion in the future.
+        #     assert init_w.get_value().shape == (n_in, n_out)
+        self.w = init_w
+
+        if self.tie:
+            assert init_wT == None, "Tied autoencoder do not accept init_wT."
+            init_wT = self.w.T
+        else:
+            if not init_wT:
+                wT = self._weight_initialization().T
+                init_wT = theano.shared(value=wT, name='wT_ae', borrow=True)
+            # else:
+            #     TODO: also here.
+            #     assert init_wT.get_value().shape == (n_in, n_out)
+        self.wT = init_wT
+
+        if not init_b:
+            init_b = theano.shared(
+                value=numpy.zeros(self.n_hid, dtype=theano.config.floatX),
+                name='b_ae_encoder', borrow=True
+            )
+        else:
+            assert init_b.get_value().shape == (self.n_hid,)
+        self.b = init_b
+        
+        if not init_bT:
+            init_bT = theano.shared(
+                value=numpy.zeros(self.n_in, dtype=theano.config.floatX),
+                name='b_ae_decoder', borrow=True
+            )
+        else:
+            assert init_bT.get_value().shape == (self.n_in,)
+        self.bT = init_bT
+
+        self.params = [self.w, self.b]
+        if self.tie:
+            self.params_private = self.params + [self.bT]
+        else:
+            self.params_private = self.params + [self.wT, self.bT]
+
+    def _weight_initialization(self):
+        w = numpy.asarray(npy_rng.uniform(
+            low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+            high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+            size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
+        return w
+
+    def encoder(self):
+        raise NotImplementedError("To be implemented by subclass.")
+
+    def decoder(self):
+        if self.vistype == 'binary':
+            return SigmoidLayer(
+                self.n_hid, self.n_in, varin=self.encoder().output(),
+                init_w=self.wT, init_b=self.bT
+            )
+        elif self.vistype == 'real':
+            return LinearLayer(
+                self.n_hid, self.n_in, varin=self.encoder().output(),
+                init_w=self.wT, init_b=self.bT
+            )
+
+    def weightdecay(self, weightdecay=1e-3):
+        if self.tie:
+            return weightdecay * (self.w**2).sum()
+        else:
+            return weightdecay * ((self.w**2).sum() + (self.wT**2).sum())
+
+
+class SigmoidAutoencoder(BasicAutoencoder):
+    def encoder(self):
+        return SigmoidLayer(
+            self.n_in, self.n_hid, varin=self.varin,
+            init_w=self.w, init_b=self.b
+        )
+
+    def contraction(self, contract_level=0.1):
+        """
+        We are computing the Jacobian, i.e. dh / dv, implicitly. The equivalent
+        explicit way is:
+            jacobian = dh.dimshuffle(0, 1, 'x') * self.w.dimshuffle('x', 1, 0)
+            contraction_per_case = T.sum(jacobian ** 2, axis=(1, 2))
+        This implementation is inspired by https://groups.google.com/forum/#!to-
+        pic/pylearn-dev/iY7swxgn-xI/discussion . It helps speeding up
+        computation and reducing memory usage dramatically.
+        """
+        dh = self.hidden() * (1 - self.hidden())  # sigmoid derivative
+        contraction_per_case = T.sum(T.dot(dh**2, self.w.T**2), axis=1)
+        return contract_level * T.mean(contraction_per_case)
+
+
+class LinearAutoencoder(BasicAutoencoder):
+    def encoder(self):
+        return LinearLayer(
+            self.n_in, self.n_hid, varin=self.varin,
+            init_w=self.w, init_b=self.b
+        )
+
+    def contraction(self, contract_level=0.1):
+        """
+        It happens to work better than contraction (i.e., weight decay), though
+        not known why. Calling it contraction is wrong.
+        """
+        h = self.hidden()  # dh * h
+        contraction_per_case = T.sum(T.dot(h**2, self.w.T**2), axis=1)
+        return contract_level * T.mean(contraction_per_case)
+
+
+class ReluAutoencoder(BasicAutoencoder):
+    def _weight_initialization(self):
+        # TODO: Adjust it.
+        w = numpy.asarray(npy_rng.uniform(
+            low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+            high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+            size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
+        return w
+
+    def encoder(self):
+        return ReluLayer(
+            self.n_in, self.n_hid,
+            varin=self.varin, init_w=self.w, init_b=self.b
+        )
+
+
+class AbsAutoencoder(BasicAutoencoder):
+    def _weight_initialization(self):
+        # TODO: Adjust it.
+        w = numpy.asarray(npy_rng.uniform(
+            low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+            high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+            size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
+        return w
+    
+    def encoder(self):
+        return AbsLayer(
+            self.n_in, self.n_hid,
+            varin=self.varin, init_w=self.w, init_b=self.b
+        )
+
+
+class ZerobiasAutoencoder(BasicAutoencoder):
+    def __init__(self, n_in, n_hid, vistype, threshold=1.0, varin=None,
+                 tie=True, init_w=None, init_wT=None, init_bT=None, 
+                 npy_rng=None):
+        super(ZerobiasAutoencoder, self).__init__(
+            n_in, n_hid, vistype, varin=varin, tie=tie,
+            init_w=init_w, init_wT=init_wT, init_bT=init_bT, 
+            npy_rng=npy_rng
+        )
+        self.threshold = threshold
+
+        self.params = [self.w]
+        if tie:
+            self.params_private = self.params + [self.bT]
+        else:
+            self.params_private = self.params + [self.wT, self.bT]
+        del self.b
+
+    def _weight_initialization(self):
+        # TODO: Adjust it.
+        w = numpy.asarray(npy_rng.uniform(
+            low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+            high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
+            size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
+        return w
+    
+    def encoder(self):
+        return ZerobiasLayer(
+            self.n_in, self.n_hid, threshold=self.threshold,
+            varin=self.varin, init_w=self.w
+        )
+
+
+# depreciated:
 class ClassicalAutoencoder(AutoEncoder):
     def __init__(self, n_in, n_hid, vistype, hidtype=None, varin=None, tie=True,
                  init_w=None, init_b=None, init_wT=None, init_bT=None,
                  npy_rng=None):
+        print ("ClassicalAutoencoder is depreciated, please use"
+               "SigmoidAutoencoder or LinearAutoencoder instead.")
+
         super(ClassicalAutoencoder, self).__init__(
             n_in, n_hid, vistype=vistype, varin=varin
         )
@@ -292,253 +496,3 @@ class ClassicalAutoencoder(AutoEncoder):
             dh = 1.  # self.hidden()  # linear activation derivative
         contraction_per_case = T.sum(T.dot(dh**2, self.w.T**2), axis=1)
         return contract_level * T.mean(contraction_per_case)
-
-
-class ZerobiasAutoencoder(AutoEncoder):
-    def __init__(self, n_in, n_hid, vistype, threshold=1.0, varin=None,
-                 tie=True, init_w=None, init_wT=None, init_bT=None, 
-                 npy_rng=None):
-        super(ZerobiasAutoencoder, self).__init__(
-            n_in, n_hid, vistype=vistype, varin=varin
-        )
-        self.threshold = threshold
-
-        if not npy_rng:
-            npy_rng = numpy.random.RandomState(123)
-        assert isinstance(npy_rng, numpy.random.RandomState)
-
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
-                high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
-                size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_zae', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = init_w
-
-        if tie:
-            assert init_wT == None, "Tied autoencoder do not accept init_wT."
-            init_wT = self.w.T
-        else:
-            if not init_wT:
-                wT = numpy.asarray(npy_rng.uniform(
-                    low = -4 * numpy.sqrt(6. / (self.n_hid + self.n_in)),
-                    high = 4 * numpy.sqrt(6. / (self.n_hid + self.n_in)),
-                    size=(self.n_hid, self.n_in)), dtype=theano.config.floatX)
-                init_wT = theano.shared(value=w, name='wT_zae', borrow=True)
-            # else:
-            #     TODO. The following assetion is complaining about an attribute
-            #     error while passing w.T to init_w. Considering using a more
-            #     robust way of assertion in the future.
-            #     assert init_wT.get_value().shape == (n_in, n_out)
-        self.wT = init_wT
-
-        if not init_bT:
-            init_bT = theano.shared(value=numpy.zeros(
-                                        self.n_in, dtype=theano.config.floatX),
-                                    name='b_zae_decoder', borrow=True)
-        else:
-            assert init_bT.get_value().shape == (self.n_in,)
-        self.bT = init_bT
-
-        self.params = [self.w]
-        if tie:
-            self.params_private = self.params + [self.bT]
-        else:
-            self.params_private = self.params + [self.wT, self.bT]
-
-    def encoder(self):
-        return ZerobiasLayer(
-            self.n_in, self.n_hid, threshold=self.threshold,
-            varin=self.varin, init_w=self.w
-        )
-
-    def decoder(self):
-        if self.vistype == 'binary':
-            return SigmoidLayer(
-                self.n_hid, self.n_in, varin=self.encoder().output(),
-                init_w=self.wT, init_b=self.bT
-            )
-        elif self.vistype == 'real':
-            return LinearLayer(
-                self.n_hid, self.n_in, varin=self.encoder().output(),
-                init_w=self.wT, init_b=self.bT
-            )
-
-
-class ReluAutoencoder(AutoEncoder):
-    def __init__(self, n_in, n_hid, vistype, varin=None, tie=True,
-                 init_w=None, init_b=None, init_wT=None, init_bT=None, 
-                 npy_rng=None):
-        super(ReluAutoencoder, self).__init__(
-            n_in, n_hid, vistype=vistype, varin=varin
-        )
-
-        if not npy_rng:
-            npy_rng = numpy.random.RandomState(123)
-        assert isinstance(npy_rng, numpy.random.RandomState)
-
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
-                high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
-                size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_reluae', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = init_w
-
-        if not init_b:
-            init_b = theano.shared(
-                value=numpy.zeros(self.n_hid, dtype=theano.config.floatX),
-                name='b_reluae_encoder',
-                borrow=True
-            )
-        else:
-            assert init_b.get_value().shape == (self.n_hid,)
-        self.b = init_b
-        
-        if tie:
-            assert init_wT == None, "Tied autoencoder do not accept init_wT."
-            init_wT = self.w.T
-        else:
-            if not init_wT:
-                wT = numpy.asarray(npy_rng.uniform(
-                    low = -4 * numpy.sqrt(6. / (self.n_hid + self.n_in)),
-                    high = 4 * numpy.sqrt(6. / (self.n_hid + self.n_in)),
-                    size=(self.n_hid, self.n_in)), dtype=theano.config.floatX)
-                init_wT = theano.shared(value=w, name='wT_reluae', borrow=True)
-            # else:
-            #     TODO. The following assetion is complaining about an attribute
-            #     error while passing w.T to init_w. Considering using a more
-            #     robust way of assertion in the future.
-            #     assert init_wT.get_value().shape == (n_in, n_out)
-        self.wT = init_wT
-
-        if not init_bT:
-            init_bT = theano.shared(
-                value=numpy.zeros(self.n_in, dtype=theano.config.floatX),
-                name='b_reluae_decoder',
-                borrow=True
-            )
-        else:
-            assert init_bT.get_value().shape == (self.n_in,)
-        self.bT = init_bT
-
-        self.params = [self.w, self.b]
-        if tie:
-            self.params_private = self.params + [self.bT]
-        else:
-            self.params_private = self.params + [self.wT, self.bT]
-
-    def encoder(self):
-        return ReluLayer(
-            self.n_in, self.n_hid,
-            varin=self.varin, init_w=self.w, init_b=self.b
-        )
-
-    def decoder(self):
-        if self.vistype == 'binary':
-            return SigmoidLayer(
-                self.n_hid, self.n_in, varin=self.encoder().output(),
-                init_w=self.wT, init_b=self.bT
-            )
-        elif self.vistype == 'real':
-            return LinearLayer(
-                self.n_hid, self.n_in, varin=self.encoder().output(),
-                init_w=self.wT, init_b=self.bT
-            )
-
-
-class AbsAutoencoder(AutoEncoder):
-    def __init__(self, n_in, n_hid, vistype, varin=None, tie=True,
-                 init_w=None, init_b=None, init_wT=None, init_bT=None, 
-                 npy_rng=None):
-        super(AbsAutoencoder, self).__init__(
-            n_in, n_hid, vistype=vistype, varin=varin
-        )
-
-        if not npy_rng:
-            npy_rng = numpy.random.RandomState(123)
-        assert isinstance(npy_rng, numpy.random.RandomState)
-
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
-                high = 4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
-                size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_absae', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = init_w
-
-        if not init_b:
-            init_b = theano.shared(
-                value=numpy.zeros(self.n_hid, dtype=theano.config.floatX),
-                name='b_absae_encoder',
-                borrow=True
-            )
-        else:
-            assert init_b.get_value().shape == (self.n_hid,)
-        self.b = init_b
-        
-        if tie:
-            assert init_wT == None, "Tied autoencoder do not accept init_wT."
-            init_wT = self.w.T
-        else:
-            if not init_wT:
-                wT = numpy.asarray(npy_rng.uniform(
-                    low = -4 * numpy.sqrt(6. / (self.n_hid + self.n_in)),
-                    high = 4 * numpy.sqrt(6. / (self.n_hid + self.n_in)),
-                    size=(self.n_hid, self.n_in)), dtype=theano.config.floatX)
-                init_wT = theano.shared(value=w, name='wT_absae', borrow=True)
-            # else:
-            #     TODO. The following assetion is complaining about an attribute
-            #     error while passing w.T to init_w. Considering using a more
-            #     robust way of assertion in the future.
-            #     assert init_wT.get_value().shape == (n_in, n_out)
-        self.wT = init_wT
-
-        if not init_bT:
-            init_bT = theano.shared(
-                value=numpy.zeros(self.n_in, dtype=theano.config.floatX),
-                name='b_absae_decoder',
-                borrow=True
-            )
-        else:
-            assert init_bT.get_value().shape == (self.n_in,)
-        self.bT = init_bT
-
-        self.params = [self.w, self.b]
-        if tie:
-            self.params_private = self.params + [self.bT]
-        else:
-            self.params_private = self.params + [self.wT, self.bT]
-
-    def encoder(self):
-        return AbsLayer(
-            self.n_in, self.n_hid,
-            varin=self.varin, init_w=self.w, init_b=self.b
-        )
-
-    def decoder(self):
-        if self.vistype == 'binary':
-            return SigmoidLayer(
-                self.n_hid, self.n_in, varin=self.encoder().output(),
-                init_w=self.wT, init_b=self.bT
-            )
-        elif self.vistype == 'real':
-            return LinearLayer(
-                self.n_hid, self.n_in, varin=self.encoder().output(),
-                init_w=self.wT, init_b=self.bT
-            )
