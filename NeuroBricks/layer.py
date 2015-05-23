@@ -394,39 +394,51 @@ class StackedLayer(Layer):
             assert isinstance(layer, Layer), (
                 "All models in the models_stack list should be some "
                 "subclass of Layer")
-        super(StackedLayer, self).__init__(
-            n_in=models_stack[0].n_in, n_out=models_stack[-1].n_out,
-            varin=varin
-        )
+        
+        self.n_in = models_stack[0].n_in
+        if not varin:
+            varin = T.matrix('varin')
+        assert isinstance(varin, T.TensorVariable)
+        self.varin = varin
+        self.params = []  # to be implemented by subclass
 
         previous_layer = None
         for layer_model in models_stack:
             if not previous_layer:  # First layer
                 layer_model.varin = self.varin
             else:
-                left_is_tuple = isinstance(previous_layer.n_out, tuple)
-                right_is_tuple = isinstance(layer_model.n_in, tuple)
                 info = ("Dimension mismatch detected when stacking two "
                         "layers.\nformer layer:\n" + \
                         previous_layer._print_str() + \
-                        "\nlatter layer:\n" + layer_model._print_str() + "\n")
+                        "\nlatter layer:\n")
                 # two conv layers or two FC layers
-                if (left_is_tuple and right_is_tuple) or \
-                   ((not left_is_tuple) and (not right_is_tuple)):
-                    assert previous_layer.n_out == layer_model.n_in, info
+                if (layer_model.FC and previous_layer.FC) or \
+                   ((not previous_layer.FC) and (not layer_model.FC)):
+                    if layer_model.n_in == None:
+                        layer_model.n_in = previous_layer.n_out
+                        layer_model._init_complete()
+                    assert previous_layer.n_out == layer_model.n_in, \
+                        (info + layer_model._print_str() + "\n")
                     layer_model.varin = previous_layer.output()
-                elif left_is_tuple:  # CONV-FC
+                elif layer_model.FC:  # CONV-FC
+                    if layer_model.n_in == None:
+                        layer_model.n_in = numpy.prod(previous_layer.n_out[1:])
+                        layer_model._init_complete()
                     assert numpy.prod(previous_layer.n_out[1:]) == \
-                        layer_model.n_in, info
+                        layer_model.n_in, \
+                        (info + layer_model._print_str() + "\n")
                     layer_model.varin=previous_layer.output().flatten(2)
-                elif right_is_tuple:  # FC-CONV
+                elif previous_layer.FC:  # FC-CONV
                     assert numpy.prod(layer_model.n_in) == \
-                        previous_layer.n_out[1:], info
+                        previous_layer.n_out[1:], \
+                        (info + layer_model._print_str() + "\n")
                     layer_model.varin = \
-                        previous_layer.output().reshape(previous_layer.n_out)
+                        previous_layer.output().reshape(layer_model.n_in)
             previous_layer = layer_model
             self.params += layer_model.params
         self.models_stack = models_stack
+
+        self.n_out = self.models_stack[-1].n_out
 
         if hasattr(models_stack[0], 'w'):  # This is for visualizing weights.
             self.w = models_stack[0].w
@@ -487,36 +499,45 @@ class SigmoidLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
         """
-        init_w : theano.compile.SharedVariable, optional
-            We initialise the weights to be zero here, but it can be initialized
-            into a proper random distribution by set_value() in the subclass.
+        TODO: WRITEME
         """
-        super(SigmoidLayer, self).__init__(n_in, n_out, varin=varin)
+        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
 
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (n_in + n_out)),
-                high = 4 * numpy.sqrt(6. / (n_in + n_out)),
-                size=(n_in, n_out)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_sigmoid', borrow=True)
+        self.n_out = n_out
+        if not init_b:
+            init_b = theano.shared(
+                value=numpy.zeros(n_out, dtype=theano.config.floatX),
+                name='b_sigmoid', borrow=True)
+        else:
+            assert init_b.get_value().shape == (n_out,)
+        self.b = init_b
+
+        self.init_w = init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(SigmoidLayer, self).__init__(self.n_in, self.n_out,
+                                           varin=self.varin)
+
+        if not self.init_w:
+            w = numpy.asarray(self.npy_rng.uniform(
+                low = -4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                high = 4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
+            self.init_w = theano.shared(value=w, name='w_sigmoid', borrow=True)
         # else:
         #     TODO. The following assetion is complaining about an attribute
         #     error while passing w.T to init_w. Considering using a more
         #     robust way of assertion in the future.
         #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = init_w
-
-        if not init_b:
-            init_b = theano.shared(value=numpy.zeros(
-                                       n_out,
-                                       dtype=theano.config.floatX),
-                                   name='b_sigmoid', borrow=True)
-        else:
-            assert init_b.get_value().shape == (n_out,)
-        self.b = init_b
+        self.w = self.init_w
 
         self.params = [self.w, self.b]
 
@@ -533,32 +554,37 @@ class SigmoidLayer(Layer):
 class LinearLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        super(LinearLayer, self).__init__(n_in, n_out, varin=varin)
+        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
 
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low = -numpy.sqrt(6. / (n_in + n_out)),
-                high = numpy.sqrt(6. / (n_in + n_out)),
-                size=(n_in, n_out)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_linear', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = init_w
-
+        self.n_out = n_out
         if not init_b:
-            init_b = theano.shared(value=numpy.zeros(
-                                       n_out,
-                                       dtype=theano.config.floatX),
-                                   name='b_linear', borrow=True)
+            init_b = theano.shared(
+                value=numpy.zeros(n_out, dtype=theano.config.floatX),
+                name='b_linear', borrow=True)
         else:
             assert init_b.get_value().shape == (n_out,)
         self.b = init_b
+        
+        self.init_w = init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(LinearLayer, self).__init__(self.n_in, self.n_out,
+                                          varin=self.varin)
+        if not self.init_w:
+            w = numpy.asarray(self.npy_rng.uniform(
+                low = -numpy.sqrt(6. / (self.n_in + self.n_out)),
+                high = numpy.sqrt(6. / (self.n_in + self.n_out)),
+                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
+            self.init_w = theano.shared(value=w, name='w_linear', borrow=True)
+        self.w = self.init_w
 
         self.params = [self.w, self.b]
 
@@ -575,25 +601,37 @@ class LinearLayer(Layer):
 class ZerobiasLayer(Layer):
     def __init__(self, n_in, n_out, threshold=1.0, varin=None, init_w=None, 
                  npy_rng=None):
-        super(ZerobiasLayer, self).__init__(n_in, n_out, varin=varin)
+        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
 
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low = -numpy.sqrt(6. / (n_in + n_out)),
-                high = numpy.sqrt(6. / (n_in + n_out)),
-                size=(n_in, n_out)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_zerobias', borrow=True)
-        self.w = init_w
-
-        self.params = [self.w]
+        self.n_out = n_out
         self.threshold = theano.shared(
             value=numpy.asarray(threshold, dtype=theano.config.floatX),
             name='zae_threshold',
             borrow=True
         )
+        
+        del self.init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(ZerobiasLayer, self).__init__(self.n_in, self.n_out,
+                                            varin=self.varin)
+        if not self.init_w:
+            w = numpy.asarray(self.npy_rng.uniform(
+                low = -numpy.sqrt(6. / (self.n_in + self.n_out)),
+                high = numpy.sqrt(6. / (self.n_in + self.n_out)),
+                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
+            self.init_w = theano.shared(value=w, name='w_zerobias', borrow=True)
+        self.w = self.init_w
+
+        self.params = [self.w]
 
     def set_threshold(self, new_threshold):
         self.threshold.set_value(new_threshold)
@@ -612,32 +650,37 @@ class ZerobiasLayer(Layer):
 class ReluLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        super(ReluLayer, self).__init__(n_in, n_out, varin=varin)
+        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
 
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low = -numpy.sqrt(3. / n_in),
-                high = numpy.sqrt(3. / n_in),
-                size=(n_in, n_out)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_relu', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = init_w
-
+        self.n_out = n_out
         if not init_b:
-            init_b = theano.shared(value=numpy.zeros(
-                                       n_out,
-                                       dtype=theano.config.floatX),
-                                   name='b_relu', borrow=True)
+            init_b = theano.shared(
+                value=numpy.zeros(n_out, dtype=theano.config.floatX),
+                name='b_relu', borrow=True)
         else:
             assert init_b.get_value().shape == (n_out,)
         self.b = init_b
+
+        self.init_w = init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(ReluLayer, self).__init__(self.n_in, self.n_out,
+                                        varin=self.varin)
+        if not self.init_w:
+            w = numpy.asarray(self.npy_rng.uniform(
+                low = -numpy.sqrt(3. / self.n_in),
+                high = numpy.sqrt(3. / self.n_in),
+                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
+            self.init_w = theano.shared(value=w, name='w_relu', borrow=True)
+        self.w = self.init_w
 
         self.params = [self.w, self.b]
 
@@ -654,24 +697,17 @@ class ReluLayer(Layer):
 class PReluLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        super(PReluLayer, self).__init__(n_in, n_out, varin=varin)
+        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
 
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low = -numpy.sqrt(3. / n_in),
-                high = numpy.sqrt(3. / n_in),
-                size=(n_in, n_out)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_relu', borrow=True)
-        self.w = init_w
-
+        self.n_out = n_out
         if not init_b:
-            init_b = theano.shared(value=numpy.zeros(
-                                       n_out,
-                                       dtype=theano.config.floatX),
-                                   name='b_relu', borrow=True)
+            init_b = theano.shared(
+                value=numpy.zeros(n_out, dtype=theano.config.floatX),
+                name='b_relu', borrow=True)
         else:
             assert init_b.get_value().shape == (n_out,)
         self.b = init_b
@@ -681,6 +717,23 @@ class PReluLayer(Layer):
             name='leak_rate'
         )
         
+        self.init_w = init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(PReluLayer, self).__init__(self.n_in, self.n_out,
+                                         varin=self.varin)
+        if not self.init_w:
+            w = numpy.asarray(self.npy_rng.uniform(
+                low = -numpy.sqrt(3. / self.n_in),
+                high = numpy.sqrt(3. / self.n_in),
+                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
+            self.init_w = theano.shared(value=w, name='w_relu', borrow=True)
+        self.w = self.init_w
+
         self.params = [self.w, self.b, self.lk]
 
     def fanin(self):
@@ -697,24 +750,13 @@ class PReluLayer(Layer):
 class AbsLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        super(AbsLayer, self).__init__(n_in, n_out, varin=varin)
+        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
 
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (n_in + n_out)),
-                high = 4 * numpy.sqrt(6. / (n_in + n_out)),
-                size=(n_in, n_out)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_abs', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = init_w
-
+        self.n_out = n_out
         if not init_b:
             init_b = theano.shared(
                 value=numpy.zeros(n_out, dtype=theano.config.floatX),
@@ -724,6 +766,23 @@ class AbsLayer(Layer):
         else:
             assert init_b.get_value().shape == (n_out,)
         self.b = init_b
+   
+        self.init_w = init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(AbsLayer, self).__init__(self.n_in, self.n_out,
+                                       varin=self.varin)
+        if not self.init_w:
+            w = numpy.asarray(self.npy_rng.uniform(
+                low = -4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                high = 4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
+            self.init_w = theano.shared(value=w, name='w_abs', borrow=True)
+        self.w = self.init_w
 
         self.params = [self.w, self.b]
 
@@ -740,24 +799,13 @@ class AbsLayer(Layer):
 class TanhLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        super(TanhLayer, self).__init__(n_in, n_out, varin=varin)
+        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
 
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low = -numpy.sqrt(6. / (n_in + n_out)),
-                high = numpy.sqrt(6. / (n_in + n_out)),
-                size=(n_in, n_out)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_tanh', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = init_w
-
+        self.n_out = n_out
         if not init_b:
             init_b = theano.shared(
                 value=numpy.zeros(n_out, dtype=theano.config.floatX),
@@ -767,6 +815,28 @@ class TanhLayer(Layer):
         else:
             assert init_b.get_value().shape == (n_out,)
         self.b = init_b
+
+        self.init_w = init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(TanhLayer, self).__init__(self.n_in, self.n_out,
+                                        varin=self.varin)
+        if not self.init_w:
+            w = numpy.asarray(self.npy_rng.uniform(
+                low = -numpy.sqrt(6. / (self.n_in + self.n_out)),
+                high = numpy.sqrt(6. / (self.n_in + self.n_out)),
+                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
+            self.init_w = theano.shared(value=w, name='w_tanh', borrow=True)
+        # else:
+        #     TODO. The following assetion is complaining about an attribute
+        #     error while passing w.T to init_w. Considering using a more
+        #     robust way of assertion in the future.
+        #     assert init_w.get_value().shape == (n_in, n_out)
+        self.w = self.init_w
 
         self.params = [self.w, self.b]
 
@@ -783,11 +853,12 @@ class TanhLayer(Layer):
 
 class GatedLinearLayer(Layer):
     def __init__(self):
+        self.FC = False
         raise NotImplementedError("Not implemented yet...")
 
 
 class Conv2DLayer(Layer):
-    def __init__(self, n_in, filter_shape, n_out=None, varin=None,
+    def __init__(self, filter_shape, n_in=None, varin=None,
                  init_w=None, init_b=None, npy_rng=None):
         """
         This is a base class for all 2-D convolutional classes using various of
@@ -820,28 +891,17 @@ class Conv2DLayer(Layer):
         npy_rng
         
         """
+        self.FC = False
         assert len(filter_shape) == 4, ("filter_shape has to be a 4-D tuple "
                                         "ordered in this way: (# filters, "
                                         "# input channels, # filter height, "
                                         "# filter width)")
-        assert len(n_in) == 4, ("n_in is expected to be a 4-D tuple ordered "
-                                "in this way: (batch size, # input channels, "
-                                "# input height, # input width)")
-        # filter_shape[1] has to be the same to n_in[1]
-        n_out_calcu = (n_in[0], filter_shape[0],
-                       n_in[2] - filter_shape[2] + 1,
-                       n_in[3] - filter_shape[3] + 1)
-        if not n_out:
-            n_out = n_out_calcu
-        assert n_out == n_out_calcu, "Given n_out doens't match actual output."
-        super(Conv2DLayer, self).__init__(n_in, n_out, varin=varin)
-        self.varin = self.varin.reshape(self.n_in)
-        self.filter_shape = filter_shape
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
         self.npy_rng = npy_rng
-
+        self.filter_shape = filter_shape
+        
         if not init_w:
             numparam_per_filter = numpy.prod(filter_shape[1:])
             w = self._weight_initialization()
@@ -865,6 +925,23 @@ class Conv2DLayer(Layer):
 
         self.params = [self.w, self.b]
         
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        assert len(self.n_in) == 4, (
+            "n_in is expected to be a 4-D tuple ordered in this way: (batch "
+            "size, # input channels, # input height, # input width)")
+        # filter_shape[1] has to be the same to n_in[1]
+        self.n_out = (self.n_in[0], self.filter_shape[0],
+                      self.n_in[2] - self.filter_shape[2] + 1,
+                      self.n_in[3] - self.filter_shape[3] + 1)
+        
+        super(Conv2DLayer, self).__init__(self.n_in, self.n_out,
+                                          varin=self.varin)
+        self.varin = self.varin.reshape(self.n_in)       
 
     def _weight_initialization(self):
         numparam_per_filter = numpy.prod(self.filter_shape[1:])
@@ -911,11 +988,11 @@ class ReluConv2DLayer(Conv2DLayer):
 
 
 class PReluConv2DLayer(Conv2DLayer):
-    def __init__(self, n_in, filter_shape, n_out=None, varin=None,
+    def __init__(self, filter_shape, n_in=None, varin=None,
                  init_w=None, init_b=None, npy_rng=None):
         super(PReluConv2DLayer, self).__init__(
-            n_in, filter_shape, n_out=None, varin=None, init_w=None,
-            init_b=None, npy_rng=None
+            filter_shape, n_in=n_in, varin=varin, init_w=init_w,
+            init_b=init_b, npy_rng=npy_rng
         )
         self.lk = theano.shared(
             value=numpy.float32(0.).astype(theano.config.floatX),
@@ -940,7 +1017,7 @@ class PReluConv2DLayer(Conv2DLayer):
 
 
 class PoolingLayer(Layer):
-    def __init__(self, n_in, pool_size, ignore_border=False, n_out=None,
+    def __init__(self, pool_size, n_in=None, stride=None, ignore_border=False,
                  varin=None):
         """
         Parameters
@@ -952,31 +1029,60 @@ class PoolingLayer(Layer):
         to training and has nothing to do with the model itself, while building
         the model. 
 
-        pool_size :
+        pool_size : tuple
+        A tuple with 2 entries.
 
-        ignore_border :
-        
-        n_out : tuple
-        Specifies the dimension of output. Should be consistant to the
-        convolution of filter_shape and n_in.
+        stride : tuple
+        A tuple with 2 entries, each indicating the pooling stride on each
+        dimension.
 
-        varin
+        ignore_border : bool
+
+        varin :
 
         """
-        assert len(n_in) == 4, ("n_in is expected to be a 4-D tuple ordered in "
-                                "this way: (batch size, # input channels, "
-                                "# input height, # input width)")
+        self.FC = False
         assert len(pool_size) == 2, ("pool_size should be a 2-D tuple in the "
                                      "form (# rows, # cols)")
-        n_out_calcu = (n_in[0], n_in[1], n_in[2] / pool_size[0],
-                       n_in[3] / pool_size[1])
-        if not n_out:
-            n_out = n_out_calcu
-        assert n_out == n_out_calcu, "Given n_out doens't match actual output."
-        super(PoolingLayer, self).__init__(n_in, n_out, varin=varin)
-        self.varin = self.varin.reshape(self.n_in)
         self.pool_size = pool_size
+        if not stride:
+            stride = pool_size
+        else:
+            if len(stride) != 2 or min(stride) <= 0:
+                raise ValueError(
+                    "stride should be a 2-D tuple in the form (# rows, # cols)"
+                    ". Each entry in stride should be strictly larger than 0.")
+        self.stride = stride
         self.ignore_border = ignore_border
+        
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        assert len(self.n_in) == 4, ("n_in is expected to be a 4-D tuple "
+                                     "ordered in this way: (batch size, # "
+                                     "input channels, # input height, # "
+                                     "input width)")
+        
+        # use a test method to decide the output dimension, because sometimes
+        # the output dimension behaves weirdly. Normally it should be:
+        # (max((patch - max(pool-stride, 0)), 1) + stride -1) / stride
+        tx = T.matrix().reshape((self.n_in[2], self.n_in[3]))
+        ty = downsample.max_pool_2d(
+            tx, ds=self.pool_size,
+            ignore_border=self.ignore_border, st=self.stride)
+        tf = theano.function([tx], ty)
+        # consider using theano test values instead:
+        out_dim = tf(
+            numpy.random.random((self.n_in[2], self.n_in[3])
+            ).astype(theano.config.floatX)
+        ).shape
+        
+        n_out = (self.n_in[0], self.n_in[1], out_dim[0], out_dim[1])
+        super(PoolingLayer, self).__init__(self.n_in, n_out, varin=self.varin)
+        self.varin = self.varin.reshape(self.n_in)
 
     def output(self):
         raise NotImplementedError("Must be implemented by subclass.")
@@ -989,8 +1095,5 @@ class MaxPoolingLayer(PoolingLayer):
     def output(self):
         return downsample.max_pool_2d(
             input=self.varin, ds=self.pool_size,
-            ignore_border=self.ignore_border
+            ignore_border=self.ignore_border, st=self.stride
         )
-
-    def activ_prime(self):
-        raise NotImplementedError("Not implemented yet...")

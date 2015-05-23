@@ -1,0 +1,14 @@
+ - 1 -
+We assume that all datasets are classes which contain generators. Small datasets generates all the data at once, while large ones generate a different part of the dataset at each call. 
+
+The generators contained in each dataset class should not change the value of data at all. However, There can be suplimentary generators defined in 
+
+Training algorithms deal with those generaters. So at high level it is opaque how the data are iterated over and over again. We should also allow the user to specify the frequency of printing costs. 
+
+ - 2 -
+Layers can be splitted into differentiable and non-differentiable ones. For those non-differentiable ones, they don't allow back-prop to pass through them. 
+
+For those types of layer which are for preprocessing, it should allow "instantiate-and-fit" procedure. i.e., it shoudld allow defining the layer in a StackedLayer object, and then fit it according to the provided data. In this way we have a general form of doing preprocessing and training.
+
+ - 3 -
+The inherit structure of autoencoders need to be rewritten.

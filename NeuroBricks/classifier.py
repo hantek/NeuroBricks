@@ -68,36 +68,40 @@ class Classifier(Model):
 class LogisticRegression(Classifier):
     def __init__(self, n_in, n_out, varin=None, vartruth=None, 
                  init_w=None, init_b=None, npy_rng=None):
-        super(LogisticRegression, self).__init__(
-            n_in, n_out, varin=varin, vartruth=vartruth
-        )
-
+        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
         self.npy_rng = npy_rng
-
-        if not init_w:
-            w = numpy.asarray(npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (n_in + n_out)),
-                high = 4 * numpy.sqrt(6. / (n_in + n_out)),
-                size=(n_in, n_out)), dtype=theano.config.floatX)
-            init_w = theano.shared(value=w, name='w_sigmoid', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = init_w
-
+        
+        self.n_out = n_out
         if not init_b:
-            init_b = theano.shared(value=numpy.zeros(
-                                       n_out,
-                                       dtype=theano.config.floatX),
-                                   name='b_sigmoid', borrow=True)
+            init_b = theano.shared(
+                value=numpy.zeros(n_out, dtype=theano.config.floatX),
+                name='b_sigmoid', borrow=True)
         else:
             assert init_b.get_value().shape == (n_out,)
         self.b = init_b
+
+        self.vartruth = vartruth
+        self.init_w = init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(LogisticRegression, self).__init__(
+            self.n_in, self.n_out, varin=self.varin, vartruth=self.vartruth
+        )
+
+        if not self.init_w:
+            w = numpy.asarray(self.npy_rng.uniform(
+                low = -4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                high = 4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
+            self.init_w = theano.shared(value=w, name='w_sigmoid', borrow=True)
+        self.w = self.init_w
 
         self.params = [self.w, self.b]
 
