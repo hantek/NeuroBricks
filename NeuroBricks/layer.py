@@ -407,20 +407,22 @@ class StackedLayer(Layer):
             if not previous_layer:  # First layer
                 layer_model.varin = self.varin
             else:
+                right_is_conv = hasattr(layer_model, 'conv')
+                left_is_conv = hasattr(previous_layer, 'conv')
                 info = ("Dimension mismatch detected when stacking two "
                         "layers.\nformer layer:\n" + \
                         previous_layer._print_str() + \
                         "\nlatter layer:\n")
                 # two conv layers or two FC layers
-                if (layer_model.FC and previous_layer.FC) or \
-                   ((not previous_layer.FC) and (not layer_model.FC)):
+                if (left_is_conv and right_is_conv) or \
+                   ((not left_is_conv) and (not right_is_conv)):
                     if layer_model.n_in == None:
                         layer_model.n_in = previous_layer.n_out
                         layer_model._init_complete()
                     assert previous_layer.n_out == layer_model.n_in, \
                         (info + layer_model._print_str() + "\n")
                     layer_model.varin = previous_layer.output()
-                elif layer_model.FC:  # CONV-FC
+                elif not right_is_conv:  # CONV-FC
                     if layer_model.n_in == None:
                         layer_model.n_in = numpy.prod(previous_layer.n_out[1:])
                         layer_model._init_complete()
@@ -428,7 +430,7 @@ class StackedLayer(Layer):
                         layer_model.n_in, \
                         (info + layer_model._print_str() + "\n")
                     layer_model.varin=previous_layer.output().flatten(2)
-                elif previous_layer.FC:  # FC-CONV
+                elif not left_is_conv:  # FC-CONV
                     assert numpy.prod(layer_model.n_in) == \
                         previous_layer.n_out[1:], \
                         (info + layer_model._print_str() + "\n")
@@ -501,7 +503,6 @@ class SigmoidLayer(Layer):
         """
         TODO: WRITEME
         """
-        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
@@ -554,7 +555,6 @@ class SigmoidLayer(Layer):
 class LinearLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
@@ -601,7 +601,6 @@ class LinearLayer(Layer):
 class ZerobiasLayer(Layer):
     def __init__(self, n_in, n_out, threshold=1.0, varin=None, init_w=None, 
                  npy_rng=None):
-        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
@@ -614,7 +613,7 @@ class ZerobiasLayer(Layer):
             borrow=True
         )
         
-        del self.init_w
+        self.init_w = init_w
         self.n_in, self.varin = n_in, varin
         if self.n_in != None:
             self._init_complete()
@@ -650,7 +649,6 @@ class ZerobiasLayer(Layer):
 class ReluLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
@@ -697,7 +695,6 @@ class ReluLayer(Layer):
 class PReluLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
@@ -750,7 +747,6 @@ class PReluLayer(Layer):
 class AbsLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
@@ -799,7 +795,6 @@ class AbsLayer(Layer):
 class TanhLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
-        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
@@ -853,7 +848,6 @@ class TanhLayer(Layer):
 
 class GatedLinearLayer(Layer):
     def __init__(self):
-        self.FC = False
         raise NotImplementedError("Not implemented yet...")
 
 
@@ -891,7 +885,7 @@ class Conv2DLayer(Layer):
         npy_rng
         
         """
-        self.FC = False
+        self.conv = True
         assert len(filter_shape) == 4, ("filter_shape has to be a 4-D tuple "
                                         "ordered in this way: (# filters, "
                                         "# input channels, # filter height, "
@@ -1041,7 +1035,7 @@ class PoolingLayer(Layer):
         varin :
 
         """
-        self.FC = False
+        self.conv = True
         assert len(pool_size) == 2, ("pool_size should be a 2-D tuple in the "
                                      "form (# rows, # cols)")
         self.pool_size = pool_size

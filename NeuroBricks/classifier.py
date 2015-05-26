@@ -68,7 +68,6 @@ class Classifier(Model):
 class LogisticRegression(Classifier):
     def __init__(self, n_in, n_out, varin=None, vartruth=None, 
                  init_w=None, init_b=None, npy_rng=None):
-        self.FC = True
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
