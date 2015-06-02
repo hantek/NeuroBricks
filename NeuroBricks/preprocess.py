@@ -32,8 +32,9 @@ class NeuralizedPCALayer(Layer):
     def fanin(self):
         return T.dot(self.varin - self.bvis, self.w)
 
-    def output(self):
-        return self.fanin()
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return fanin
 
     def activ_prime(self):
         return 1.

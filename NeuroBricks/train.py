@@ -180,126 +180,6 @@ class ConjugateGradient(object):
         update manner.
         """
         print "ERROR: Not usable now."
-        # TODO: check dependencies between varin, cost, and param.
-        
-        assert isinstance(varin, T.TensorVariable)
-        if (not isinstance(data, SharedCPU)) and \
-           (not isinstance(data, SharedGPU)):
-            raise TypeError("\'data\' needs to be a theano shared variable.")
-        assert isinstance(cost, T.TensorVariable)
-        assert isinstance(params, list)
-        self.varin         = varin
-        self.data          = data
-        self.cost          = cost
-        self.params        = params
-        
-        if supervised:
-            if (not isinstance(truth_data, SharedCPU)) and \
-               (not isinstance(truth_data, SharedGPU)):
-                raise TypeError("\'truth_data\' needs to be a theano " + \
-                                "shared variable.")
-            assert isinstance(truth, T.TensorVariable)
-            self.truth_data = truth_data
-            self.truth = truth
-        
-        self.verbose       = verbose
-        self.batchsize     = batchsize
-        self.numbatches    = self.data.get_value().shape[0] / batchsize
-        self.momentum      = momentum 
-        self.supervised    = supervised
-        
-        if rng is None:
-            rng = numpy.random.RandomState(1)
-        assert isinstance(rng, numpy.random.RandomState), \
-            "rng has to be a random number generater."
-        self.rng = rng
-
-        self.epochcount = 0
-        self.index = T.lscalar('batch_index_in_sgd') 
-        self.incs = dict([(
-            p, 
-            theano.shared(value=numpy.zeros(p.get_value().shape, 
-                                            dtype=theano.config.floatX),
-                          name='inc_' + p.name,
-                          broadcastable=p.broadcastable)
-        ) for p in self.params])
-
-        self.grad = T.grad(self.cost, self.params)
-
-        self.set_learningrate(learningrate)
-
-
-    def set_learningrate(self, learningrate):
-        """
-        TODO: set_learningrate() is not known to be working after 
-        initialization. Not checked. A unit test should be written on it.
-        """
-        self.learningrate  = learningrate
-        self.inc_updates = []  # updates the parameter increasements (i.e. 
-                               # value in the self.incs dictionary.). Due to 
-                               # momentum, the increasement itself is
-                               # changing between epochs. Its increasing by:
-                               # from (key) inc_params 
-                               # to (value) momentum * inc_params - lr * grad
-                               
-        self.updates = []  # updates the parameters of model during each epoch.
-                           # from (key) params
-                           # to (value) params + inc_params
-                           
-        for _param, _grad in zip(self.params, self.grad):
-            self.inc_updates.append(
-                (self.incs[_param],
-                 self.momentum * self.incs[_param] - self.learningrate * _grad
-                )
-            )
-            self.updates.append((_param, _param + self.incs[_param]))
-
-        if not self.supervised:
-            self._updateincs = theano.function(
-                inputs = [self.index], 
-                outputs = self.cost, 
-                updates = self.inc_updates,
-                givens = {
-                    self.varin : self.data[self.index * self.batchsize: \
-                                           (self.index+1)*self.batchsize]
-                }
-            )
-        else:
-            self._updateincs = theano.function(
-                inputs = [self.index],
-                outputs = self.cost,
-                updates = self.inc_updates,
-                givens = {
-                    self.varin : self.data[self.index * self.batchsize: \
-                                           (self.index+1)*self.batchsize],
-                    self.truth : self.truth_data[self.index * self.batchsize: \
-                                                 (self.index+1)*self.batchsize]
-                }
-            )
-
-        self.n = T.scalar('n')
-        self.noop = 0.0 * self.n
-        self._trainmodel = theano.function([self.n], self.noop, 
-                                           updates = self.updates)
-
-    def step(self):
-        stepcount = 0.0
-        cost = 0.
-        for batch_index in self.rng.permutation(self.numbatches - 1):
-            stepcount += 1.0
-            # This is Roland's way of computing cost, still mean over all
-            # batches. It saves space and don't harm computing time... 
-            # But a little bit unfamilliar to understand at first glance.
-            cost = (1.0 - 1.0/stepcount) * cost + \
-                   (1.0/stepcount) * self._updateincs(batch_index)
-            self._trainmodel(0)
-
-        self.epochcount += 1
-        if self.verbose:
-            print 'epoch: %d, lr: %f, cost: %f' % (
-                self.epochcount, self.learningrate, cost
-            )
-        return cost
 
 
 class FeedbackAlignment(object):
@@ -537,8 +417,174 @@ class Dropout(object):
                     theano_rng=self.theano_rng
                 ) + copy.copy(self.model)
             else:
-                raise TypeError("Dropout on a layer with no parameters has" + \
+                raise TypeError("Dropout on a layer with no parameters has " + \
                                 "no meaning currently")
         else:
             raise TypeError("Passed model has to be an Autoencoder, " + \
                             "StackedLayer or single Layer")
+
+
+class BatchNormalization(object):
+    def __init__(self, model, npy_rng=None):
+        """
+        TODO: a working version for Conv, and check if it works fine on
+        autoencoders.
+        
+        A batch normalization implementation according to the following paper:
+
+        http://arxiv.org/pdf/1502.03167.pdf
+        
+        Build a model with batch normalization according to the passed model,
+        which could be an AutoEncoder object or StackedLayer object. The newly
+        built model shares the same theano shared parameters with the initial
+        one, but has inplanted batch normalization at PRE-activations (i.e.
+        before applying the activation function). Also, it establishes a new
+        parameter group: params_batchnorm. In addition to all those parameters
+        contained in params, params_batchnorm has included [gamma, beta], which
+        are introduced by batch normalizaion.
+
+        At test time, the means and variances are over the whole dataset. So it
+        should be a big batch containing all the training/testing samples for
+        this implementation. Will use an moving average instead in future
+        updates. 
+        """
+        if npy_rng is None:
+            npy_rng = numpy.random.RandomState(3456)
+        assert isinstance(npy_rng, numpy.random.RandomState), \
+            "npy_rng has to be a random number generater."
+        self.npy_rng = npy_rng
+        self.model = model 
+
+        if isinstance(self.model, AutoEncoder):
+            self.dropout_model = copy.copy(self.model)
+            def batchnorm_encoder():
+                encoder_layer = self.model.encoder()
+                assert not isinstance(encoder_layer, StackedLayer), (
+                    "Batch normalization on deep autoencoder with more than "
+                    "1 layer of encoder/decoder is not supported.")
+                encoder_layer.gamma = theano.shared(
+                    numpy.ones(self.model.n_out, dtype=theano.config.floatX),
+                    name='gamma_encoder', borrow=True
+                )
+                encoder_layer.beta = theano.shared(
+                    numpy.zeros(self.model.n_out, dtype=theano.config.floatX),
+                    name='beta_encoder', borrow=True
+                )
+                encoder_layer.params_batchnorm = encoder_layer.params + \
+                    [encoder_layer.gamma, encoder_layer.beta]
+                def normed_fanin_encoder():
+                    return (
+                        self.model.encoder().fanin() - \
+                        self.model.encoder().fanin().mean(
+                            axis=0, keepdims=True)
+                    ) / (
+                        self.model.encoder().fanin().std(
+                            axis=0, keepdims=True
+                        ) + 1E-6
+                    ) * encoder_layer.gamma + encoder_layer.beta
+                encoder_layer.fanin = normed_fanin_encoder
+                return encoder_layer
+            self.batchnorm_model.encoder = batchnorm_encoder
+            
+        elif isinstance(self.model, StackedLayer):
+            # TODO: more thing to do for assertion here. Not sure if it will
+            # work for nested StackedLayer object.
+            # assert len(droprates) == len(self.model.models_stack), \
+            #        "List \"droprates\" has a wrong length."
+            copied_model_list = []
+            for layer_model in self.model.models_stack:
+                copied_model_list.append(copy.copy(layer_model))
+            copied_model = StackedLayer(models_stack=copied_model_list,
+                                        varin=self.model.varin)
+            
+            copied_model.params_batchnorm = []
+            prev_layer = None
+            for layer_model in copied_model.models_stack:
+                # process prev_layer
+                if prev_layer != None and prev_layer.params != []:
+                    prev_layer.gamma = theano.shared(
+                        numpy.ones(prev_layer.n_out,
+                                   dtype=theano.config.floatX),
+                        name='gamma', borrow=True
+                    )
+                    prev_layer.beta = theano.shared(
+                        numpy.zeros(prev_layer.n_out,
+                                    dtype=theano.config.floatX),
+                        name='beta', borrow=True
+                    )
+                    prev_layer.params_batchnorm = \
+                        prev_layer.params + [prev_layer.gamma, prev_layer.beta]
+                    copied_model.params_batchnorm += \
+                        prev_layer.params_batchnorm
+                    
+                    wx = prev_layer.fanin()  # wx stands for w * x.
+                    layer_model.varin = prev_layer.output(
+                        (
+                            wx - wx.mean(axis=0, keepdims=True)
+                        ) / (
+                            wx.std(axis=0, keepdims=True) + 1E-6
+                        ) * prev_layer.gamma + prev_layer.beta
+                    )
+                prev_layer = layer_model
+            
+            # process the last layer
+            if layer_model.params != []:
+                layer_model.gamma = theano.shared(
+                    numpy.ones(layer_model.n_out,
+                               dtype=theano.config.floatX),
+                    name='gamma', borrow=True
+                )
+                layer_model.beta = theano.shared(
+                    numpy.zeros(layer_model.n_out,
+                                dtype=theano.config.floatX),
+                    name='beta', borrow=True
+                )
+                layer_model.params_batchnorm = \
+                    layer_model.params + [layer_model.gamma, layer_model.beta]
+                copied_model.params_batchnorm += layer_model.params_batchnorm
+
+                def last_layer_output(fanin=None):
+                    wx = layer_model.fanin()  # wx stands for w * x.
+                    return self.model.models_stack[-1].output(
+                        (
+                            wx - wx.mean(axis=0, keepdims=True)
+                        ) / (
+                            wx.std(axis=0, keepdims=True) + 1E-6
+                        ) * layer_model.gamma + layer_model.beta
+                    )
+                layer_model.output = last_layer_output
+            
+            self.batchnorm_model = copied_model
+
+        elif isinstance(self.model, Layer):
+            if self.model.params != []:
+                copied_layer = copy.copy(self.model)
+                copied_layer.gamma = theano.shared(
+                    numpy.ones(layer_model.n_in,
+                               dtype=theano.config.floatX),
+                    name='gamma', borrow=True
+                )
+                copied_layer.beta = theano.shared(
+                    numpy.zeros(layer_model.n_in,
+                                dtype=theano.config.floatX),
+                    name='beta', borrow=True
+                )
+                copied_layer.params_batchnorm = layer_model.params + \
+                    [copied_layer.gamma, copied_layer.beta]
+                def normed_fanin():
+                    return (
+                        self.model.fanin() - self.model.fanin().mean(
+                            axis=0, keepdims=True)
+                    ) / (
+                        self.model.fanin().std(axis=0, keepdims=True) + 1E-6
+                    ) * copied_layer.gamma + copied_layer.beta
+                copied_layer.fanin = normed_fanin
+                self.batchnorm_model = copied_layer
+            else:
+                raise TypeError("Batch normalization on a layer with no "
+                                "parameters has no meaning currently.")
+        else:
+            raise TypeError("Passed model has to be an Autoencoder, "
+                            "StackedLayer or Layer object.")
+
+

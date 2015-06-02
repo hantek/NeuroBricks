@@ -107,9 +107,10 @@ class LogisticRegression(Classifier):
     def fanin(self):
         return T.dot(self.varin, self.w) + self.b
 
-    def output(self):
+    def output(self, fanin=None):
         """The output of a logistic regressor is p_y_given_x."""
-        return T.nnet.softmax(self.fanin())
+        if fanin == None:   fanin = self.fanin()
+        return T.nnet.softmax(fanin)
 
     def activ_prime(self):
         """for the special relationship between softmax and sigmoid, we can

@@ -54,9 +54,11 @@ class MNIST(object):
     def get_train_set(self, include_valid=False):
         if include_valid:
             big_train = numpy.concatenate(
-                self.train_set[0], self.valid_set[0], axis=0
+                (self.train_set[0], self.valid_set[0]), axis=0
             )
-            big_truth = numpy.concatenate(self.train_set[1], self.valid_set[1])
+            big_truth = numpy.concatenate(
+                (self.train_set[1], self.valid_set[1])
+            )
             return (big_train, big_truth)
         else:
             return self.train_set

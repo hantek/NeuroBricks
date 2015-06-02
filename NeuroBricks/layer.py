@@ -545,8 +545,9 @@ class SigmoidLayer(Layer):
     def fanin(self):
         return T.dot(self.varin, self.w) + self.b
 
-    def output(self):
-        return T.nnet.sigmoid(self.fanin())
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.nnet.sigmoid(fanin)
 
     def activ_prime(self):
         return self.output() * (1. - self.output())
@@ -591,8 +592,9 @@ class LinearLayer(Layer):
     def fanin(self):
         return T.dot(self.varin, self.w) + self.b
 
-    def output(self):
-        return self.fanin()
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return fanin
 
     def activ_prime(self):
         return 1.
@@ -638,8 +640,8 @@ class ZerobiasLayer(Layer):
     def fanin(self):
         return T.dot(self.varin, self.w)
 
-    def output(self):
-        fanin = self.fanin()
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
         return T.switch(fanin > self.threshold, fanin, 0.)
 
     def activ_prime(self):
@@ -685,8 +687,9 @@ class ReluLayer(Layer):
     def fanin(self):
         return T.dot(self.varin, self.w) + self.b
 
-    def output(self):
-        return T.maximum(self.fanin(), 0.)
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.maximum(fanin, 0.)
 
     def activ_prime(self):
         return (self.fanin() > 0.) * 1.
@@ -736,8 +739,8 @@ class PReluLayer(Layer):
     def fanin(self):
         return T.dot(self.varin, self.w) + self.b
 
-    def output(self):
-        fanin = self.fanin()
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
         return T.switch(fanin > 0., fanin, fanin * self.lk)
 
     def activ_prime(self):
@@ -785,8 +788,9 @@ class AbsLayer(Layer):
     def fanin(self):
         return T.dot(self.varin, self.w) + self.b
 
-    def output(self):
-        return T.abs_(self.fanin())
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.abs_(fanin)
 
     def activ_prime(self):
         return (self.fanin() > 0.) * 2. - 1.
@@ -838,12 +842,70 @@ class TanhLayer(Layer):
     def fanin(self):
         return T.dot(self.varin, self.w) + self.b
 
-    def output(self):
-        return T.tanh(self.fanin())
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.tanh(fanin)
 
     def activ_prime(self):
         e_m2x = T.exp(-2. * self.fanin())
         return 4. * e_m2x / ((1. + e_m2x) ** 2)
+
+
+class MaxoutLayer(Layer):
+    def __init__(self, n_in, n_piece, n_out, varin=None,
+                 init_w=None, init_b=None, npy_rng=None):
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
+
+        self.n_out = n_out
+        self.n_piece = n_piece
+        if not init_b:
+            init_b = theano.shared(
+                value=numpy.zeros((1, n_piece, n_out), dtype=theano.config.floatX),
+                name='b_maxout',
+                borrow=True,
+                broadcastable=(True, False, False)
+            )
+        else:
+            assert init_b.get_value().shape == (1, n_piece, n_out)
+        self.b = init_b
+
+        self.init_w = init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(MaxoutLayer, self).__init__(self.n_in, self.n_out,
+                                          varin=self.varin)
+        if not self.init_w:
+            w = numpy.asarray(
+                self.npy_rng.uniform(
+                    low = -numpy.sqrt(6. / (self.n_in + self.n_out)),
+                    high = numpy.sqrt(6. / (self.n_in + self.n_out)),
+                    size=(self.n_in, self.n_piece, self.n_out)),
+                dtype=theano.config.floatX
+            )
+            self.init_w = theano.shared(value=w, name='w_maxout', borrow=True)
+        self.w = self.init_w
+
+        self.params = [self.w, self.b]
+
+    def fanin(self):
+        return T.tensordot(self.varin, self.w, axes=[1, 0]) + self.b
+
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.max(fanin, axis=1)
+
+    def weightdecay(self, weightdecay=1e-3):
+        return weightdecay * (self.w**2).sum()
+    
+    def activ_prime(self):
+        raise NotImplementedError("Not implemented yet...")
 
 
 class GatedLinearLayer(Layer):
@@ -974,8 +1036,9 @@ class ReluConv2DLayer(Conv2DLayer):
             size=self.filter_shape), dtype=theano.config.floatX)
         return w
 
-    def output(self):
-        return T.maximum(self.fanin(), 0.)
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.maximum(fanin, 0.)
 
     def activ_prime(self):
         raise NotImplementedError("Not implemented yet...")
@@ -1002,8 +1065,8 @@ class PReluConv2DLayer(Conv2DLayer):
             size=self.filter_shape), dtype=theano.config.floatX)
         return w
 
-    def output(self):
-        fanin = self.fanin()
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
         return T.switch(fanin > 0., fanin, fanin * self.lk)
 
     def activ_prime(self):
