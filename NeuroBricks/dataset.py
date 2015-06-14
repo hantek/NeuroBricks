@@ -47,7 +47,7 @@ class MNIST(object):
         """
         MNIST is too tiny to have a iterator structure.
         """
-        f = gzip.open('/data/lisa/data/mnist.pkl.gz', 'rb')
+        f = gzip.open(file_path, 'rb')
         self.train_set, self.valid_set, self.test_set = cPickle.load(f)
         f.close()
     
