@@ -63,6 +63,10 @@ class GraddescentMinibatch(object):
         self.rng = rng
 
         self.epochcount = 0
+        self.stepcount = 0
+        self.stepcost = 0.
+        self.steptimer = 0.
+        
         self.index = T.lscalar('batch_index_in_sgd') 
         self.incs = dict([(
             p, 
@@ -141,7 +145,7 @@ class GraddescentMinibatch(object):
         self._trainmodel = theano.function(inputs=[], updates = self.updates)
             
 
-    def step(self):
+    def epoch(self):
         start = time.time()
         stepcount = 0.0
         cost = 0.
@@ -164,6 +168,60 @@ class GraddescentMinibatch(object):
                 self.epochcount, (stop - start), self.learningrate, cost) + \
                   'update norm %.3g angle(RAD) %.3f' % (norm, angle_rad)
 
+        return cost
+
+    def step(self, verbose_stride=1):
+        """
+        Randomly pick a minibatch from dataset, and perform one step of update.
+        While swithcing between self.epoch(), the update norm, angle may not be
+        immediately correct after the epoch/step at which you switch.
+        """
+        start = time.time()
+        self.ref_vector.set_value(self.get_params_value())
+        batch_index = self.rng.randint(0, self.numbatches - 1)
+        
+        cost = self._updateincs(batch_index)
+        self._trainmodel()
+        
+        self.stepcost += cost
+        self.stepcount += 1
+
+        norm, angle_rad = self.get_step_info()
+        stop = time.time()
+        self.steptimer += (stop - start)
+        if (self.stepcount % verbose_stride == 0) and self.verbose:
+            print 'minibatch %d: %.2fs, lr %.3g cost %.6g, ' % (
+                self.stepcount, self.steptimer, self.learningrate,
+                self.stepcost / verbose_stride) + \
+                  'update norm %.3g angle(RAD) %.3f' % (norm, angle_rad)
+            self.steptimer = 0.
+            self.stepcost = 0.
+        return cost
+
+    def step_fast(self, verbose_stride=1):
+        """
+        A faster implementation of step(). Removes evaluation of angles,
+        norms, etc.
+        
+        MUCH FASTER!! ~ 20 times!!
+        """
+        start = time.time()
+        batch_index = self.rng.randint(0, self.numbatches - 1)
+        
+        cost = self._updateincs(batch_index)
+        self._trainmodel()
+        
+        self.stepcost += cost
+        self.stepcount += 1
+
+        stop = time.time()
+        self.steptimer += (stop - start)
+        if (self.stepcount % verbose_stride == 0) and self.verbose:
+            print 'minibatch %d: %.2fs, lr %.3g cost %.6g ' % (
+                self.stepcount, self.steptimer, self.learningrate,
+                self.stepcost / verbose_stride)
+            self.steptimer = 0.
+            self.stepcost = 0.
         return cost
 
     def draw_gradient(self,):
