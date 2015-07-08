@@ -487,8 +487,8 @@ class Dropout(object):
 class BatchNormalization(object):
     def __init__(self, model, npy_rng=None):
         """
-        TODO: a working version for Conv, and check if it works fine on
-        autoencoders.
+        TODO: check if it works for autoencoders. Use moving average instead to
+        allow for real normalization at test time.
         
         A batch normalization implementation according to the following paper:
 
@@ -502,6 +502,9 @@ class BatchNormalization(object):
         parameter group: params_batchnorm. In addition to all those parameters
         contained in params, params_batchnorm has included [gamma, beta], which
         are introduced by batch normalizaion.
+
+        Remember to apply this class at the last step of any other tricks, like
+        dropout etc.
 
         At test time, the means and variances are over the whole dataset. So it
         should be a big batch containing all the training/testing samples for
