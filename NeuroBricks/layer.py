@@ -486,8 +486,8 @@ class StackedLayer(Layer):
                     repeat_count += 1
                 else:
                     if repeat_count != 0:
-                        print " " * (num_space - 5), \
-                              "(same x %d)" % (repeat_count + 1)
+                        print " " * (num_space - 6), \
+                              "(+ same x %d)" % (repeat_count)
                         repeat_count = 0
                     print " " * num_space + "|"
                     print layer_string
@@ -994,7 +994,12 @@ class Conv2DLayer(Layer):
         self.n_out = (self.n_in[0], self.filter_shape[0],
                       self.n_in[2] - self.filter_shape[2] + 1,
                       self.n_in[3] - self.filter_shape[3] + 1)
-        
+        if self.n_out[2] == 0 or self.n_out[3] == 0:
+            raise ValueError(
+                "Output dimension of convolution layer reaches 0 :\n" + \
+                self._print_str() + "\n"
+            )
+
         super(Conv2DLayer, self).__init__(self.n_in, self.n_out,
                                           varin=self.varin)
         self.varin = self.varin.reshape(self.n_in)       
@@ -1136,8 +1141,14 @@ class PoolingLayer(Layer):
             numpy.random.random((self.n_in[2], self.n_in[3])
             ).astype(theano.config.floatX)
         ).shape
-        
+
         n_out = (self.n_in[0], self.n_in[1], out_dim[0], out_dim[1])
+        if n_out[2] == 0 or n_out[3] == 0:
+            raise ValueError(
+                "Output dimension of pooling layer reaches 0 :\n" + \
+                self._print_str() + "\n"
+            )
+        
         super(PoolingLayer, self).__init__(self.n_in, n_out, varin=self.varin)
         self.varin = self.varin.reshape(self.n_in)
 

@@ -173,8 +173,10 @@ class GraddescentMinibatch(object):
     def step(self, verbose_stride=1):
         """
         Randomly pick a minibatch from dataset, and perform one step of update.
-        While swithcing between self.epoch(), the update norm, angle may not be
-        immediately correct after the epoch/step at which you switch.
+        
+        If you switch this method between self.epoch() during training, the
+        update norm, angle may not be immediately correct after the epoch/step
+        at which you switch.
         """
         start = time.time()
         self.ref_vector.set_value(self.get_params_value())

@@ -39,6 +39,7 @@ import gzip
 import cPickle
 import numpy
 import matplotlib.pyplot as plt
+import scipy.io as sio
 from scipy.misc import imread
 
 
@@ -123,6 +124,46 @@ class CIFAR10(object):
         )
         os.chdir(crnt_dir)
         return (test_x, test_y)
+
+
+class SVHN(object):
+    def __init__(self, folderpath="/data/lisa/data/SVHN/format2/"):
+        """
+        The initial shape is (32, 32, 3, # samples), and it is transposed to be
+        consistent with CIFAR10 and 80MIO.         
+        """
+        self.folderpath = folderpath
+
+    def get_train_set(self, include_extra=False):
+        crnt_dir = os.getcwd()
+        os.chdir(self.folderpath)
+        data = sio.loadmat('train_32x32.mat')
+        y = data['y'].reshape(73257,)
+        x = data['X'].transpose(3, 0, 1, 2).reshape(73257, 3072)
+        os.chdir(crnt_dir)
+        if include_extra:
+            extra_x, extra_y = self.get_extra_set()
+            x = numpy.concatenate([x, extra_x])
+            y = numpy.concatenate([y, extra_y])
+        return (x, y)
+
+    def get_test_set(self):
+        crnt_dir = os.getcwd()
+        os.chdir(self.folderpath)
+        data = sio.loadmat('test_32x32.mat')
+        os.chdir(crnt_dir)
+        y = data['y'].reshape(26032,)
+        x = data['X'].transpose(3, 0, 1, 2).reshape(26032, 3072)
+        return (x, y)
+
+    def get_extra_set(self):
+        crnt_dir = os.getcwd()
+        os.chdir(self.folderpath)
+        data = sio.loadmat('extra_32x32.mat')
+        os.chdir(crnt_dir)
+        y = data['y'].reshape(531131,)
+        x = data['X'].transpose(3, 0, 1, 2).reshape(531131, 3072)
+        return (x, y)
 
 
 class TinyImages(object):
