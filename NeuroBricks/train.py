@@ -79,7 +79,7 @@ class GraddescentMinibatch(object):
         self.grad = T.grad(self.cost, self.params)
 
         self.set_learningrate(learningrate)
-
+        
         params_vector = T.concatenate([p.flatten() for p in self.params])
         self.get_params_value = theano.function([], params_vector)
         self.ref_vector = theano.shared(value=self.get_params_value(),

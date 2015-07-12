@@ -34,7 +34,8 @@ class Layer(object):
         assert isinstance(varin, T.TensorVariable)
         self.varin = varin
 
-        self.params = []  # to be implemented by subclass
+        if not hasattr(self, 'params'):
+            self.params = []  # to be implemented by subclass
 
         self.patch_ind = numpy.asarray([])  # needed by plotting.
         self.givens_activation = {}  # hist_activation() is going to need it.
@@ -439,7 +440,6 @@ class StackedLayer(Layer):
             previous_layer = layer_model
             self.params += layer_model.params
         self.models_stack = models_stack
-
         self.n_out = self.models_stack[-1].n_out
 
         if hasattr(models_stack[0], 'w'):  # This is for visualizing weights.
@@ -978,8 +978,6 @@ class Conv2DLayer(Layer):
         else:
             assert init_b.get_value().shape == (filter_shape[0],)
         self.b = init_b
-
-        self.params = [self.w, self.b]
         
         self.n_in, self.varin = n_in, varin
         if self.n_in != None:
@@ -1003,6 +1001,7 @@ class Conv2DLayer(Layer):
         super(Conv2DLayer, self).__init__(self.n_in, self.n_out,
                                           varin=self.varin)
         self.varin = self.varin.reshape(self.n_in)       
+        self.params = [self.w, self.b]
 
     def _weight_initialization(self):
         numparam_per_filter = numpy.prod(self.filter_shape[1:])
