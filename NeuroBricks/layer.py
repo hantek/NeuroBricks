@@ -497,6 +497,77 @@ class StackedLayer(Layer):
         print "-" * 50
 
 
+class BaseLayer(Layer):
+    def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
+                 npy_rng=None):
+        """
+        n_in : None or int
+        You must specify n_in while constructing the object.
+        Specify it to be None to let the constructor set it automatically
+        according to its previous layer.
+
+        n_out : int
+
+        varin : None or theano symbolic value
+
+        init_w : None or theano.shared
+
+        init_b : None or theano.shared
+
+        npy_rng : None or numpy.random.RandomState
+
+        TODO: WRITEME
+        """
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
+
+        self.n_out = n_out
+        if not init_b:
+            init_b = theano.shared(
+                value=numpy.zeros(n_out, dtype=theano.config.floatX),
+                name=self.__class__.__name__ + '_b', borrow=True)
+        else:
+            assert init_b.get_value().shape == (n_out,)
+        self.b = init_b
+
+        self.init_w = init_w
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        super(BaseLayer, self).__init__(self.n_in, self.n_out,
+                                        varin=self.varin)
+
+        if not self.init_w:
+            w = numpy.asarray(self.npy_rng.uniform(
+                low = -4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                high = 4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
+            self.init_w = theano.shared(
+                value=w, name=self.__class__.__name__ + '_w', borrow=True)
+        # else:
+        #     TODO. The following assetion is complaining about an attribute
+        #     error while passing w.T to init_w. Considering using a more
+        #     robust way of assertion in the future.
+        #     assert init_w.get_value().shape == (n_in, n_out)
+        self.w = self.init_w
+
+        self.params = [self.w, self.b]
+
+    def fanin(self):
+        return T.dot(self.varin, self.w) + self.b
+
+    def output(self, fanin=None):
+        raise NotImplementedError("Must be implemented by subclass.")
+
+    def activ_prime(self):
+        raise NotImplementedError("Must be implemented by subclass.")
+
+        
 class SigmoidLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
@@ -1024,6 +1095,15 @@ class Conv2DLayer(Layer):
         raise NotImplementedError("Not implemented yet...")
 
 
+class LinearConv2DLayer(Conv2DLayer):
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return fanin
+
+    def activ_prime(self):
+        raise NotImplementedError("Not implemented yet...")
+
+
 class ReluConv2DLayer(Conv2DLayer):
     def _weight_initialization(self):
         """
@@ -1059,8 +1139,11 @@ class PReluConv2DLayer(Conv2DLayer):
             value=numpy.float32(0.).astype(theano.config.floatX),
             name='leak_rate'
         )
-        self.params.append(self.lk)
 
+    def _init_complete(self):
+        super(PReluConv2DLayer, self)._init_complete()
+        self.params.append(self.lk)
+    
     def _weight_initialization(self):
         numparam_per_filter = numpy.prod(self.filter_shape[1:])
         w = numpy.asarray(self.npy_rng.uniform(

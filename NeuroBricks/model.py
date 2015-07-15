@@ -204,7 +204,8 @@ class BasicAutoencoder(AutoEncoder):
 
         if not init_w:
             w = self._weight_initialization()
-            init_w = theano.shared(value=w, name='w_ae', borrow=True)
+            init_w = theano.shared(
+                value=w, name=self.__class__.__name__ + '_w', borrow=True)
         # else:
         #     TODO. The following assetion is complaining about an attribute
         #     error while passing w.T to init_w. Considering using a more
@@ -218,7 +219,8 @@ class BasicAutoencoder(AutoEncoder):
         else:
             if not init_wT:
                 wT = self._weight_initialization().T
-                init_wT = theano.shared(value=wT, name='wT_ae', borrow=True)
+                init_wT = theano.shared(
+                    value=wT, name=self.__class__.__name__ + 'wT', borrow=True)
             # else:
             #     TODO: also here.
             #     assert init_wT.get_value().shape == (n_in, n_out)
@@ -227,7 +229,7 @@ class BasicAutoencoder(AutoEncoder):
         if not init_b:
             init_b = theano.shared(
                 value=numpy.zeros(self.n_hid, dtype=theano.config.floatX),
-                name='b_ae_encoder', borrow=True
+                name=self.__class__.__name__ + '_encoder_b', borrow=True
             )
         else:
             assert init_b.get_value().shape == (self.n_hid,)
@@ -236,7 +238,7 @@ class BasicAutoencoder(AutoEncoder):
         if not init_bT:
             init_bT = theano.shared(
                 value=numpy.zeros(self.n_in, dtype=theano.config.floatX),
-                name='b_ae_decoder', borrow=True
+                name=self.__class__.__name__ + '_decoder_b', borrow=True
             )
         else:
             assert init_bT.get_value().shape == (self.n_in,)
