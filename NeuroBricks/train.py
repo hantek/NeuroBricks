@@ -450,9 +450,6 @@ class QuantizedBackProp(object):
                     i += 1
         print self.grad
         print self.params
-
-        pdb.set_trace()
-
         # /set "gradient"
 
         self.set_learningrate(learningrate)
