@@ -362,8 +362,7 @@ class FeedbackAlignment(object):
                 )
             )  
 
-
-    def step(self):
+    def epoch(self):
         stepcount = 0.
         cost = 0.
         for batch_index in self.rng.permutation(self.numbatches - 1):
@@ -378,6 +377,225 @@ class FeedbackAlignment(object):
             print 'epoch: %d, lr: %f, cost: %f' % (
                 self.epochcount, self.learningrate, cost
             )
+        return cost
+
+
+class QuantizedBackProp(object):
+    def __init__(self, model, varin, data, cost, params, 
+                 truth=None, truth_data=None, supervised=False,
+                 batchsize=100, learningrate=0.1, momentum=0.9, 
+                 rng=None, verbose=True):
+        """
+        Using stochastic gradient descent with momentum on data in a minibatch
+        update manner.
+        It requires ALL layers 
+        """
+        assert isinstance(model, StackedLayer)
+        assert isinstance(varin, T.TensorVariable)
+        if (not isinstance(data, SharedCPU)) and \
+           (not isinstance(data, SharedGPU)):
+            raise TypeError("\'data\' needs to be a theano shared variable.")
+        assert isinstance(cost, T.TensorVariable)
+        assert isinstance(params, list)
+        self.model         = model
+        self.varin         = varin
+        self.data          = data
+        self.cost          = cost
+        self.params        = params
+        
+        if supervised:
+            if (not isinstance(truth_data, SharedCPU)) and \
+               (not isinstance(truth_data, SharedGPU)):
+                raise TypeError("\'truth_data\' needs to be a theano " + \
+                                "shared variable.")
+            assert isinstance(truth, T.TensorVariable)
+            self.truth_data = truth_data
+            self.truth = truth
+        
+        self.verbose       = verbose
+        self.batchsize     = batchsize
+        self.numbatches    = self.data.get_value().shape[0] / batchsize
+        self.momentum      = momentum 
+        self.supervised    = supervised
+        
+        if rng is None:
+            rng = numpy.random.RandomState(1)
+        assert isinstance(rng, numpy.random.RandomState), \
+            "rng has to be a random number generater."
+        self.rng = rng
+
+        self.epochcount = 0
+        self.stepcount = 0
+        self.stepcost = 0.
+        self.steptimer = 0.
+        
+        self.index = T.lscalar('batch_index_in_sgd') 
+        self.incs = dict([(
+            p, 
+            theano.shared(value=numpy.zeros(p.get_value().shape, 
+                                            dtype=theano.config.floatX),
+                          name='inc_' + p.name,
+                          broadcastable=p.broadcastable)
+        ) for p in self.params])
+
+        self.grad = T.grad(self.cost, self.params)
+        # set "gradient"
+        for ilayer in model.models_stack:
+            if hasattr(ilayer, 'quantized_bprop'):
+                ilayer.quantized_bprop(self.cost)
+                i = 0
+                for iparam in self.params:
+                    if ilayer.w is iparam:
+                        self.grad[i] = ilayer.dEdW
+                    i += 1
+        print self.grad
+        print self.params
+
+        pdb.set_trace()
+
+        # /set "gradient"
+
+        self.set_learningrate(learningrate)
+        
+        params_vector = T.concatenate([p.flatten() for p in self.params])
+        self.get_params_value = theano.function([], params_vector)
+        self.ref_vector = theano.shared(value=self.get_params_value(),
+                                        name='step_ref_params',
+                                        borrow=True)
+
+        inc_vector = params_vector - self.ref_vector
+        norm_ref_vector = T.sqrt(T.sum(self.ref_vector ** 2))
+        norm_inc_vector = T.sqrt(T.sum(inc_vector ** 2))
+        angle_rad = T.arccos(T.dot(self.ref_vector, inc_vector) /\
+                    (norm_ref_vector * norm_inc_vector))
+
+        self.get_step_info = theano.function([], (norm_inc_vector, angle_rad))
+
+    def set_learningrate(self, learningrate):
+        self.learningrate  = learningrate
+        self.inc_updates = []  # updates the parameter increasements (i.e. 
+                               # value in the self.incs dictionary.). Due to 
+                               # momentum, the increasement itself is
+                               # changing between epochs. Its increasing by:
+                               # from (key) inc_params 
+                               # to (value) momentum * inc_params - lr * grad
+                               
+        self.updates = []  # updates the parameters of model during each epoch.
+                           # from (key) params
+                           # to (value) params + inc_params
+                           
+        for _param, _grad in zip(self.params, self.grad):
+            self.inc_updates.append(
+                (self.incs[_param],
+                 self.momentum * self.incs[_param] - self.learningrate * _grad
+                )
+            )
+            self.updates.append((_param, _param + self.incs[_param]))
+
+        if not self.supervised:
+            self._updateincs = theano.function(
+                inputs = [self.index], 
+                outputs = self.cost, 
+                updates = self.inc_updates,
+                givens = {
+                    self.varin : self.data[self.index * self.batchsize: \
+                                           (self.index+1)*self.batchsize]
+                }
+            )
+        else:
+            self._updateincs = theano.function(
+                inputs = [self.index],
+                outputs = self.cost,
+                updates = self.inc_updates,
+                givens = {
+                    self.varin : self.data[self.index * self.batchsize: \
+                                           (self.index+1)*self.batchsize],
+                    self.truth : self.truth_data[self.index * self.batchsize: \
+                                                 (self.index+1)*self.batchsize]
+                }
+            )
+
+        self._trainmodel = theano.function(inputs=[], updates = self.updates)
+
+    def epoch(self):
+        start = time.time()
+        stepcount = 0.0
+        cost = 0.
+        self.ref_vector.set_value(self.get_params_value())
+        for batch_index in self.rng.permutation(self.numbatches - 1):
+            stepcount += 1.0
+            # This is Roland's way of computing cost, still mean over all
+            # batches. It saves space and don't harm computing time... 
+            # But a little bit unfamilliar to understand at first glance.
+            cost = (1.0 - 1.0/stepcount) * cost + \
+                   (1.0/stepcount) * self._updateincs(batch_index)
+            
+            self._trainmodel()
+
+        norm, angle_rad = self.get_step_info()
+        self.epochcount += 1
+        stop = time.time()
+        if self.verbose:
+            print 'epoch %d: %.2fs, lr %.3g cost %.6g, ' % (
+                self.epochcount, (stop - start), self.learningrate, cost) + \
+                  'update norm %.3g angle(RAD) %.3f' % (norm, angle_rad)
+
+        return cost
+
+    def step(self, verbose_stride=1):
+        """
+        Randomly pick a minibatch from dataset, and perform one step of update.
+        
+        If you switch this method between self.epoch() during training, the
+        update norm, angle may not be immediately correct after the epoch/step
+        at which you switch.
+        """
+        start = time.time()
+        self.ref_vector.set_value(self.get_params_value())
+        batch_index = self.rng.randint(0, self.numbatches - 1)
+        
+        cost = self._updateincs(batch_index)
+        self._trainmodel()
+        
+        self.stepcost += cost
+        self.stepcount += 1
+
+        norm, angle_rad = self.get_step_info()
+        stop = time.time()
+        self.steptimer += (stop - start)
+        if (self.stepcount % verbose_stride == 0) and self.verbose:
+            print 'minibatch %d: %.2fs, lr %.3g cost %.6g, ' % (
+                self.stepcount, self.steptimer, self.learningrate,
+                self.stepcost / verbose_stride) + \
+                  'update norm %.3g angle(RAD) %.3f' % (norm, angle_rad)
+            self.steptimer = 0.
+            self.stepcost = 0.
+        return cost
+
+    def step_fast(self, verbose_stride=1):
+        """
+        A faster implementation of step(). Removes evaluation of angles,
+        norms, etc.
+        
+        MUCH FASTER!! ~ 20 times!!
+        """
+        start = time.time()
+        batch_index = self.rng.randint(0, self.numbatches - 1)
+        
+        cost = self._updateincs(batch_index)
+        self._trainmodel()
+        
+        self.stepcost += cost
+        self.stepcount += 1
+
+        stop = time.time()
+        self.steptimer += (stop - start)
+        if (self.stepcount % verbose_stride == 0) and self.verbose:
+            print 'minibatch %d: %.2fs, lr %.3g cost %.6g ' % (
+                self.stepcount, self.steptimer, self.learningrate,
+                self.stepcost / verbose_stride)
+            self.steptimer = 0.
+            self.stepcost = 0.
         return cost
 
 

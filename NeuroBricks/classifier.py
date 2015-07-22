@@ -77,7 +77,7 @@ class LogisticRegression(Classifier):
         if not init_b:
             init_b = theano.shared(
                 value=numpy.zeros(n_out, dtype=theano.config.floatX),
-                name='b_sigmoid', borrow=True)
+                name=self.__class__.__name__ + '_b', borrow=True)
         else:
             assert init_b.get_value().shape == (n_out,)
         self.b = init_b
@@ -99,13 +99,15 @@ class LogisticRegression(Classifier):
                 low = -4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
                 high = 4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
                 size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
-            self.init_w = theano.shared(value=w, name='w_sigmoid', borrow=True)
+            self.init_w = theano.shared(value=w,
+                name=self.__class__.__name__ + '_w', borrow=True)
         self.w = self.init_w
 
         self.params = [self.w, self.b]
 
     def fanin(self):
-        return T.dot(self.varin, self.w) + self.b
+        self.varfanin = T.dot(self.varin, self.w) + self.b
+        return self.varfanin
 
     def output(self, fanin=None):
         """The output of a logistic regressor is p_y_given_x."""
@@ -131,6 +133,103 @@ class LogisticRegression(Classifier):
 
     def predict(self):
         return T.argmax(self.output(), axis=1)
+
+
+class BinaryLogisticRegression(LogisticRegression):
+    def __init__(self, n_in, n_out, mode='stochastic', varin=None,
+                 vartruth=None, init_w=None, init_b=None, npy_rng=None):
+        super(BinaryLogisticRegression, self).__init__(
+            n_in=n_in, n_out=n_out, varin=varin, vartruth=vartruth,
+            init_w=init_w, init_b=init_b, npy_rng=npy_rng
+        )
+        self.srng = theano.sandbox.rng_mrg.MRG_RandomStreams(
+            self.npy_rng.randint(999999))
+        self.mode = mode
+        
+    def fanin(self):
+        self.varfanin = T.dot(self.varin, self.binarized_weight()) + self.b
+        return self.varfanin
+    
+    def binarized_weight(self):
+        self.w0 = (
+            4 * numpy.sqrt(6. / (self.n_in + self.n_out)) / 2
+        ).astype(theano.config.floatX)
+        if self.mode == 'deterministic':
+            self.wb = T.switch(T.ge(self.w, 0), self.w0, -self.w0)
+
+        elif self.mode == 'stochastic':
+            # probability=hard_sigmoid(w/w0)
+            p = T.clip(((self.w / self.w0) + 1) / 2, 0, 1)
+            p_mask = T.cast(self.srng.binomial(n=1, p=p, size=T.shape(self.w)),
+                            theano.config.floatX)
+
+            # [0,1] -> -W0 or W0
+            self.wb = T.switch(p_mask, self.w0, -self.w0)
+
+        else:
+            raise ValueError("Parameter 'self.mode' has to be either "
+                             "'deterministic' or 'stochastic'")
+
+        return self.wb
+
+    def quantized_bprop(self, cost):
+        index_low = T.switch(self.varin > 0.,
+            T.floor(T.log2(self.varin)), T.floor(T.log2(-self.varin))
+        )
+        index_low = T.clip(index_low, -4, 3)
+        sign = T.switch(self.varin > 0., 1., -1.)
+        # the upper 2**(integer power) though not used explicitly.
+        # index_up = index_low + 1
+        # percentage of upper index.
+        p_up = sign * self.varin / 2**(index_low) - 1
+        index_random = index_low + self.srng.binomial(
+            n=1, p=p_up, size=T.shape(self.varin), dtype=theano.config.floatX)
+        # quantized_rep = sign * 2**index_random
+        quantized_rep = self.varin
+
+        error = T.grad(cost=cost, wrt=self.varfanin)
+
+        self.dEdW = T.dot(quantized_rep.T, error)
+
+
+class LinearSVM(LogisticRegression):
+    def output(self, fanin=None):
+        """The output of a logistic regressor is p_y_given_x."""
+        if fanin == None:   fanin = self.fanin()
+        return fanin
+
+    def activ_prime(self):
+        raise NotImplementedError("Must be implemented by subclass.")
+
+    def cost(self):
+        """Squared hinge loss"""
+        return T.mean(
+            T.sqr(T.maximum(
+                0.,
+                1. - (2 * T.extra_ops.to_one_hot(
+                    self.vartruth, self.n_out) - 1) * self.output()
+            ))
+        )
+
+
+class BinaryLinearSVM(BinaryLogisticRegression):
+    def output(self, fanin=None):
+        """The output of a logistic regressor is p_y_given_x."""
+        if fanin == None:   fanin = self.fanin()
+        return fanin
+
+    def activ_prime(self):
+        raise NotImplementedError("Must be implemented by subclass.")
+
+    def cost(self):
+        """Squared hinge loss"""
+        return T.mean(
+            T.sqr(T.maximum(
+                0.,
+                1. - (2 * T.extra_ops.to_one_hot(
+                    self.vartruth, self.n_out) - 1) * self.output()
+            ))
+        )
 
 
 class Perceptron(Classifier):

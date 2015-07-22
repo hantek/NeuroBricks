@@ -501,6 +501,9 @@ class BaseLayer(Layer):
     def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
                  npy_rng=None):
         """
+        An abstract class, providing basic settings for fully connected layers.
+        It should be suit for most of the fully connected cases.
+        
         n_in : None or int
         You must specify n_in while constructing the object.
         Specify it to be None to let the constructor set it automatically
@@ -543,12 +546,9 @@ class BaseLayer(Layer):
                                         varin=self.varin)
 
         if not self.init_w:
-            w = numpy.asarray(self.npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
-                high = 4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
-                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
             self.init_w = theano.shared(
-                value=w, name=self.__class__.__name__ + '_w', borrow=True)
+                value=self._weight_initialization(),
+                name=self.__class__.__name__ + '_w', borrow=True)
         # else:
         #     TODO. The following assetion is complaining about an attribute
         #     error while passing w.T to init_w. Considering using a more
@@ -558,8 +558,18 @@ class BaseLayer(Layer):
 
         self.params = [self.w, self.b]
 
+    def _weight_initialization(self):
+        return numpy.asarray(
+            self.npy_rng.uniform(
+                low = -4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                high = 4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
+                size=(self.n_in, self.n_out)),
+            dtype=theano.config.floatX
+        )
+
     def fanin(self):
-        return T.dot(self.varin, self.w) + self.b
+        self.varfanin = T.dot(self.varin, self.w) + self.b
+        return self.varfanin
 
     def output(self, fanin=None):
         raise NotImplementedError("Must be implemented by subclass.")
@@ -568,54 +578,7 @@ class BaseLayer(Layer):
         raise NotImplementedError("Must be implemented by subclass.")
 
         
-class SigmoidLayer(Layer):
-    def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
-                 npy_rng=None):
-        """
-        TODO: WRITEME
-        """
-        if not npy_rng:
-            npy_rng = numpy.random.RandomState(123)
-        assert isinstance(npy_rng, numpy.random.RandomState)
-        self.npy_rng = npy_rng
-
-        self.n_out = n_out
-        if not init_b:
-            init_b = theano.shared(
-                value=numpy.zeros(n_out, dtype=theano.config.floatX),
-                name='b_sigmoid', borrow=True)
-        else:
-            assert init_b.get_value().shape == (n_out,)
-        self.b = init_b
-
-        self.init_w = init_w
-        self.n_in, self.varin = n_in, varin
-        if self.n_in != None:
-            self._init_complete()
-
-    def _init_complete(self):
-        assert self.n_in != None, "Need to have n_in attribute to execute."
-        super(SigmoidLayer, self).__init__(self.n_in, self.n_out,
-                                           varin=self.varin)
-
-        if not self.init_w:
-            w = numpy.asarray(self.npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
-                high = 4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
-                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
-            self.init_w = theano.shared(value=w, name='w_sigmoid', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = self.init_w
-
-        self.params = [self.w, self.b]
-
-    def fanin(self):
-        return T.dot(self.varin, self.w) + self.b
-
+class SigmoidLayer(BaseLayer):
     def output(self, fanin=None):
         if fanin == None:   fanin = self.fanin()
         return T.nnet.sigmoid(fanin)
@@ -624,44 +587,15 @@ class SigmoidLayer(Layer):
         return self.output() * (1. - self.output())
 
 
-class LinearLayer(Layer):
-    def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
-                 npy_rng=None):
-        if not npy_rng:
-            npy_rng = numpy.random.RandomState(123)
-        assert isinstance(npy_rng, numpy.random.RandomState)
-        self.npy_rng = npy_rng
-
-        self.n_out = n_out
-        if not init_b:
-            init_b = theano.shared(
-                value=numpy.zeros(n_out, dtype=theano.config.floatX),
-                name='b_linear', borrow=True)
-        else:
-            assert init_b.get_value().shape == (n_out,)
-        self.b = init_b
-        
-        self.init_w = init_w
-        self.n_in, self.varin = n_in, varin
-        if self.n_in != None:
-            self._init_complete()
-
-    def _init_complete(self):
-        assert self.n_in != None, "Need to have n_in attribute to execute."
-        super(LinearLayer, self).__init__(self.n_in, self.n_out,
-                                          varin=self.varin)
-        if not self.init_w:
-            w = numpy.asarray(self.npy_rng.uniform(
+class LinearLayer(BaseLayer):
+    def _weight_initialization(self):
+        return numpy.asarray(
+            self.npy_rng.uniform(
                 low = -numpy.sqrt(6. / (self.n_in + self.n_out)),
                 high = numpy.sqrt(6. / (self.n_in + self.n_out)),
-                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
-            self.init_w = theano.shared(value=w, name='w_linear', borrow=True)
-        self.w = self.init_w
-
-        self.params = [self.w, self.b]
-
-    def fanin(self):
-        return T.dot(self.varin, self.w) + self.b
+                size=(self.n_in, self.n_out)),
+            dtype=theano.config.floatX
+        )
 
     def output(self, fanin=None):
         if fanin == None:   fanin = self.fanin()
@@ -669,6 +603,104 @@ class LinearLayer(Layer):
 
     def activ_prime(self):
         return 1.
+
+
+class AbsLayer(BaseLayer):
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.abs_(fanin)
+
+    def activ_prime(self):
+        return (self.fanin() > 0.) * 2. - 1.
+
+
+class TanhLayer(BaseLayer):
+    def _weight_initialization(self):
+        return numpy.asarray(
+            self.npy_rng.uniform(
+                low = -numpy.sqrt(6. / (self.n_in + self.n_out)),
+                high = numpy.sqrt(6. / (self.n_in + self.n_out)),
+                size=(self.n_in, self.n_out)),
+            dtype=theano.config.floatX
+        )
+
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.tanh(fanin)
+
+    def activ_prime(self):
+        e_m2x = T.exp(-2. * self.fanin())
+        return 4. * e_m2x / ((1. + e_m2x) ** 2)
+
+
+class ReluLayer(BaseLayer):
+    def _weight_initialization(self):
+        return numpy.asarray(
+            self.npy_rng.uniform(
+                low = -numpy.sqrt(3. / self.n_in),
+                high = numpy.sqrt(3. / self.n_in),
+                size=(self.n_in, self.n_out)),
+            dtype=theano.config.floatX
+        )
+
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.maximum(fanin, 0.)
+
+    def activ_prime(self):
+        return (self.fanin() > 0.) * 1.
+
+
+class BinaryReluLayer(ReluLayer):
+    def __init__(self, n_in, n_out, mode='stochastic',
+                 varin=None, init_w=None, init_b=None, npy_rng=None):
+        super(BinaryReluLayer, self).__init__(n_in=n_in, n_out=n_out, varin=varin,
+                         init_w=init_w, init_b=init_b, npy_rng=npy_rng)
+        self.srng = theano.sandbox.rng_mrg.MRG_RandomStreams(
+            self.npy_rng.randint(999999))
+        self.mode = mode
+
+    def binarized_weight(self):
+        self.w0 = (numpy.sqrt(3. / self.n_in) / 2).astype(theano.config.floatX)
+        if self.mode == 'deterministic':
+            self.wb = T.switch(T.ge(self.w, 0), self.w0, -self.w0)
+
+        elif self.mode == 'stochastic':
+            # probability=hard_sigmoid(w/w0)
+            p = T.clip(((self.w / self.w0) + 1) / 2, 0, 1)
+            p_mask = T.cast(self.srng.binomial(n=1, p=p, size=T.shape(self.w)),
+                            theano.config.floatX)
+
+            # [0,1] -> -W0 or W0
+            self.wb = T.switch(p_mask, self.w0, -self.w0)
+
+        else:
+            raise ValueError("Parameter 'self.mode' has to be either "
+                             "'deterministic' or 'stochastic'")
+
+        return self.wb
+
+    def fanin(self):
+        self.varfanin = T.dot(self.varin, self.binarized_weight()) + self.b
+        return self.varfanin
+
+    def quantized_bprop(self, cost):
+        index_low = T.switch(self.varin > 0.,
+            T.floor(T.log2(self.varin)), T.floor(T.log2(-self.varin))
+        )
+        index_low = T.clip(index_low, -4, 3)
+        sign = T.switch(self.varin > 0., 1., -1.)
+        # the upper 2**(integer power) though not used explicitly.
+        # index_up = index_low + 1
+        # percentage of upper index.
+        p_up = sign * self.varin / 2**(index_low) - 1
+        index_random = index_low + self.srng.binomial(
+            n=1, p=p_up, size=T.shape(self.varin), dtype=theano.config.floatX)
+        quantized_rep = sign * 2**index_random
+
+        error = T.grad(cost=cost, wrt=self.varfanin)
+
+        self.dEdW = T.dot(quantized_rep.T, error)
 
 
 class ZerobiasLayer(Layer):
@@ -709,7 +741,8 @@ class ZerobiasLayer(Layer):
         self.threshold.set_value(new_threshold)
     
     def fanin(self):
-        return T.dot(self.varin, self.w)
+        self.varfanin = T.dot(self.varin, self.w)
+        return self.varfanin
 
     def output(self, fanin=None):
         if fanin == None:   fanin = self.fanin()
@@ -717,53 +750,6 @@ class ZerobiasLayer(Layer):
 
     def activ_prime(self):
         return (self.fanin() > self.threshold) * 1. 
-
-
-class ReluLayer(Layer):
-    def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
-                 npy_rng=None):
-        if not npy_rng:
-            npy_rng = numpy.random.RandomState(123)
-        assert isinstance(npy_rng, numpy.random.RandomState)
-        self.npy_rng = npy_rng
-
-        self.n_out = n_out
-        if not init_b:
-            init_b = theano.shared(
-                value=numpy.zeros(n_out, dtype=theano.config.floatX),
-                name='b_relu', borrow=True)
-        else:
-            assert init_b.get_value().shape == (n_out,)
-        self.b = init_b
-
-        self.init_w = init_w
-        self.n_in, self.varin = n_in, varin
-        if self.n_in != None:
-            self._init_complete()
-
-    def _init_complete(self):
-        assert self.n_in != None, "Need to have n_in attribute to execute."
-        super(ReluLayer, self).__init__(self.n_in, self.n_out,
-                                        varin=self.varin)
-        if not self.init_w:
-            w = numpy.asarray(self.npy_rng.uniform(
-                low = -numpy.sqrt(3. / self.n_in),
-                high = numpy.sqrt(3. / self.n_in),
-                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
-            self.init_w = theano.shared(value=w, name='w_relu', borrow=True)
-        self.w = self.init_w
-
-        self.params = [self.w, self.b]
-
-    def fanin(self):
-        return T.dot(self.varin, self.w) + self.b
-
-    def output(self, fanin=None):
-        if fanin == None:   fanin = self.fanin()
-        return T.maximum(fanin, 0.)
-
-    def activ_prime(self):
-        return (self.fanin() > 0.) * 1.
 
 
 class PReluLayer(Layer):
@@ -808,7 +794,8 @@ class PReluLayer(Layer):
         self.params = [self.w, self.b, self.lk]
 
     def fanin(self):
-        return T.dot(self.varin, self.w) + self.b
+        self.varfanin = T.dot(self.varin, self.w) + self.b
+        return self.varfanin
 
     def output(self, fanin=None):
         if fanin == None:   fanin = self.fanin()
@@ -816,110 +803,6 @@ class PReluLayer(Layer):
 
     def activ_prime(self):
         return T.switch(self.fanin() > 0., 1., self.lk)
-
-
-class AbsLayer(Layer):
-    def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
-                 npy_rng=None):
-        if not npy_rng:
-            npy_rng = numpy.random.RandomState(123)
-        assert isinstance(npy_rng, numpy.random.RandomState)
-        self.npy_rng = npy_rng
-
-        self.n_out = n_out
-        if not init_b:
-            init_b = theano.shared(
-                value=numpy.zeros(n_out, dtype=theano.config.floatX),
-                name='b_abs',
-                borrow=True
-            )
-        else:
-            assert init_b.get_value().shape == (n_out,)
-        self.b = init_b
-   
-        self.init_w = init_w
-        self.n_in, self.varin = n_in, varin
-        if self.n_in != None:
-            self._init_complete()
-
-    def _init_complete(self):
-        assert self.n_in != None, "Need to have n_in attribute to execute."
-        super(AbsLayer, self).__init__(self.n_in, self.n_out,
-                                       varin=self.varin)
-        if not self.init_w:
-            w = numpy.asarray(self.npy_rng.uniform(
-                low = -4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
-                high = 4 * numpy.sqrt(6. / (self.n_in + self.n_out)),
-                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
-            self.init_w = theano.shared(value=w, name='w_abs', borrow=True)
-        self.w = self.init_w
-
-        self.params = [self.w, self.b]
-
-    def fanin(self):
-        return T.dot(self.varin, self.w) + self.b
-
-    def output(self, fanin=None):
-        if fanin == None:   fanin = self.fanin()
-        return T.abs_(fanin)
-
-    def activ_prime(self):
-        return (self.fanin() > 0.) * 2. - 1.
-
-
-class TanhLayer(Layer):
-    def __init__(self, n_in, n_out, varin=None, init_w=None, init_b=None, 
-                 npy_rng=None):
-        if not npy_rng:
-            npy_rng = numpy.random.RandomState(123)
-        assert isinstance(npy_rng, numpy.random.RandomState)
-        self.npy_rng = npy_rng
-
-        self.n_out = n_out
-        if not init_b:
-            init_b = theano.shared(
-                value=numpy.zeros(n_out, dtype=theano.config.floatX),
-                name='b_tanh',
-                borrow=True
-            )
-        else:
-            assert init_b.get_value().shape == (n_out,)
-        self.b = init_b
-
-        self.init_w = init_w
-        self.n_in, self.varin = n_in, varin
-        if self.n_in != None:
-            self._init_complete()
-
-    def _init_complete(self):
-        assert self.n_in != None, "Need to have n_in attribute to execute."
-        super(TanhLayer, self).__init__(self.n_in, self.n_out,
-                                        varin=self.varin)
-        if not self.init_w:
-            w = numpy.asarray(self.npy_rng.uniform(
-                low = -numpy.sqrt(6. / (self.n_in + self.n_out)),
-                high = numpy.sqrt(6. / (self.n_in + self.n_out)),
-                size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
-            self.init_w = theano.shared(value=w, name='w_tanh', borrow=True)
-        # else:
-        #     TODO. The following assetion is complaining about an attribute
-        #     error while passing w.T to init_w. Considering using a more
-        #     robust way of assertion in the future.
-        #     assert init_w.get_value().shape == (n_in, n_out)
-        self.w = self.init_w
-
-        self.params = [self.w, self.b]
-
-    def fanin(self):
-        return T.dot(self.varin, self.w) + self.b
-
-    def output(self, fanin=None):
-        if fanin == None:   fanin = self.fanin()
-        return T.tanh(fanin)
-
-    def activ_prime(self):
-        e_m2x = T.exp(-2. * self.fanin())
-        return 4. * e_m2x / ((1. + e_m2x) ** 2)
 
 
 class MaxoutLayer(Layer):
@@ -966,7 +849,8 @@ class MaxoutLayer(Layer):
         self.params = [self.w, self.b]
 
     def fanin(self):
-        return T.tensordot(self.varin, self.w, axes=[1, 0]) + self.b
+        self.varfanin = T.tensordot(self.varin, self.w, axes=[1, 0]) + self.b
+        return self.varfanin
 
     def output(self, fanin=None):
         if fanin == None:   fanin = self.fanin()
@@ -1083,10 +967,11 @@ class Conv2DLayer(Layer):
         return w
 
     def fanin(self):
-        return conv.conv2d(
+        self.varfanin = conv.conv2d(
             input=self.varin, filters=self.w,
             filter_shape=self.filter_shape, image_shape=self.n_in
         ) + self.b.dimshuffle('x', 0, 'x', 'x')
+        return self.varfanin
 
     def output(self):
         raise NotImplementedError("Must be implemented by subclass.")
@@ -1126,6 +1011,81 @@ class ReluConv2DLayer(Conv2DLayer):
 
     def activ_prime(self):
         raise NotImplementedError("Not implemented yet...")
+
+
+class BinaryReluConv2DLayer(ReluConv2DLayer):
+    def __init__(self, filter_shape, n_in=None, mode='stochastic',
+                 varin=None, init_w=None, init_b=None, npy_rng=None):
+        super(BinaryReluConv2DLayer, self).__init__(
+            filter_shape=filter_shape, n_in=n_in, varin=varin,
+            init_w=init_w, init_b=init_b, npy_rng=npy_rng
+        )
+        self.srng = theano.sandbox.rng_mrg.MRG_RandomStreams(
+            self.npy_rng.randint(999999))
+        self.mode = mode
+
+    def binarized_weight(self):
+        self.w0 = (
+            numpy.sqrt(3. / numpy.prod(self.filter_shape[1:])) / 2
+        ).astype(theano.config.floatX)
+        if self.mode == 'deterministic':
+            self.wb = T.switch(T.ge(self.w, 0), self.w0, -self.w0)
+
+        elif self.mode == 'stochastic':
+            # probability=hard_sigmoid(w/w0)
+            p = T.clip(((self.w / self.w0) + 1) / 2, 0, 1)
+            p_mask = T.cast(self.srng.binomial(n=1, p=p, size=T.shape(self.w)),
+                            theano.config.floatX)
+
+            # [0,1] -> -W0 or W0
+            self.wb = T.switch(p_mask, self.w0, -self.w0)
+
+        else:
+            raise ValueError("Parameter 'self.mode' has to be either "
+                             "'deterministic' or 'stochastic'")
+
+        return self.wb
+
+    def fanin(self):
+        self.varfanin = T.nnet.conv.conv2d(
+            input=self.varin, filters=self.binarized_weight(),
+            filter_shape=self.filter_shape, image_shape=self.n_in
+        ) + self.b.dimshuffle('x', 0, 'x', 'x')
+        return self.varfanin
+
+    def quantized_bprop(self, cost):
+        """
+        bprop for convolution layer equals:
+        
+        (
+            self.x.dimshuffle(1, 0, 2, 3)       (*) 
+            T.grad(cost, wrt=#convoutput).dimshuffle(1, 0, 2, 3)[:, :, ::-1, ::-1]
+        ).dimshuffle(1, 0, 2, 3)[:, :, ::-1, ::-1]
+
+        '(*)'stands for convolution.
+        Here we quantize (rep of previous layer) and leave the rest as it is.
+        """
+        # the lower 2**(integer power)
+        index_low = T.switch(self.varin > 0.,
+            T.floor(T.log2(self.varin)), T.floor(T.log2(-self.varin))
+        )
+        index_low = T.clip(index_low, -4, 3)
+        sign = T.switch(self.varin > 0., 1., -1.)
+        # the upper 2**(integer power) though not used explicitly.
+        # index_up = index_low + 1
+        # percentage of upper index.
+        p_up = sign * self.varin / 2**(index_low) - 1
+        index_random = index_low + self.srng.binomial(
+            n=1, p=p_up, size=T.shape(self.varin), dtype=theano.config.floatX)
+        # quantized_rep = sign * 2**index_random
+        quantized_rep = self.varin
+        
+        error = T.grad(cost=cost, wrt=self.varfanin)
+
+        self.dEdW = T.nnet.conv.conv2d(
+            input=quantized_rep.dimshuffle(1, 0, 2, 3),
+            filters=error.dimshuffle(1, 0, 2, 3)[:, :, ::-1, ::-1]
+        ).dimshuffle(1, 0, 2, 3)[:, :, ::-1, ::-1]
 
 
 class PReluConv2DLayer(Conv2DLayer):
@@ -1217,8 +1177,8 @@ class PoolingLayer(Layer):
         ty = downsample.max_pool_2d(
             tx, ds=self.pool_size,
             ignore_border=self.ignore_border, st=self.stride)
+
         tf = theano.function([tx], ty)
-        # consider using theano test values instead:
         out_dim = tf(
             numpy.random.random((self.n_in[2], self.n_in[3])
             ).astype(theano.config.floatX)
