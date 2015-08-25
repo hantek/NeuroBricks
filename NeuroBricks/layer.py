@@ -732,7 +732,8 @@ class ZerobiasLayer(Layer):
                 low = -numpy.sqrt(6. / (self.n_in + self.n_out)),
                 high = numpy.sqrt(6. / (self.n_in + self.n_out)),
                 size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
-            self.init_w = theano.shared(value=w, name='w_zerobias', borrow=True)
+            self.init_w = theano.shared(
+                value=w, name=self.__class__.__name__ + '_w', borrow=True)
         self.w = self.init_w
 
         self.params = [self.w]
@@ -764,14 +765,14 @@ class PReluLayer(Layer):
         if not init_b:
             init_b = theano.shared(
                 value=numpy.zeros(n_out, dtype=theano.config.floatX),
-                name='b_relu', borrow=True)
+                name=self.__class__.__name__ + '_b', borrow=True)
         else:
             assert init_b.get_value().shape == (n_out,)
         self.b = init_b
 
         self.lk = theano.shared(
             value=numpy.float32(0.).astype(theano.config.floatX),
-            name='leak_rate'
+            name=self.__class__.__name__ + '_leak_rate'
         )
         
         self.init_w = init_w
@@ -788,7 +789,8 @@ class PReluLayer(Layer):
                 low = -numpy.sqrt(3. / self.n_in),
                 high = numpy.sqrt(3. / self.n_in),
                 size=(self.n_in, self.n_out)), dtype=theano.config.floatX)
-            self.init_w = theano.shared(value=w, name='w_relu', borrow=True)
+            self.init_w = theano.shared(
+                value=w, name=self.__class__.__name__ + '_w', borrow=True)
         self.w = self.init_w
 
         self.params = [self.w, self.b, self.lk]
@@ -818,7 +820,7 @@ class MaxoutLayer(Layer):
         if not init_b:
             init_b = theano.shared(
                 value=numpy.zeros((1, n_piece, n_out), dtype=theano.config.floatX),
-                name='b_maxout',
+                name=self.__class__.__name__ + '_b',
                 borrow=True,
                 broadcastable=(True, False, False)
             )
@@ -843,7 +845,8 @@ class MaxoutLayer(Layer):
                     size=(self.n_in, self.n_piece, self.n_out)),
                 dtype=theano.config.floatX
             )
-            self.init_w = theano.shared(value=w, name='w_maxout', borrow=True)
+            self.init_w = theano.shared(
+                value=w, name=self.__class__.__name__ + '_w', borrow=True)
         self.w = self.init_w
 
         self.params = [self.w, self.b]
@@ -916,7 +919,8 @@ class Conv2DLayer(Layer):
         if not init_w:
             numparam_per_filter = numpy.prod(filter_shape[1:])
             w = self._weight_initialization()
-            init_w = theano.shared(value=w, name='w_conv2d', borrow=True)
+            init_w = theano.shared(
+                value=w, name=self.__class__.__name__ + '_w', borrow=True)
         # else:
         #     TODO. The following assetion is complaining about an attribute
         #     error while passing w.T to init_w. Considering using a more
@@ -927,7 +931,7 @@ class Conv2DLayer(Layer):
         if not init_b:
             init_b = theano.shared(
                 value=numpy.zeros((filter_shape[0],), dtype=theano.config.floatX),
-                name='b_conv2d',
+                name=self.__class__.__name__ + '_b',
                 borrow=True
             )
         else:
@@ -1013,6 +1017,220 @@ class ReluConv2DLayer(Conv2DLayer):
         raise NotImplementedError("Not implemented yet...")
 
 
+class Conv2DPoolingReluLayer(Layer):
+    def __init__(self, filter_shape,
+                 pool_size, stride=None, ignore_border=False,
+                 n_in=None, varin=None,
+                 init_w=None, init_b=None, npy_rng=None):
+        """
+        Order of operation: 
+            conv2D -> bias -> max pooling -> ReLU
+        If there is batch normalization, it goes between pooling and ReLU.
+        """
+        self.conv = True
+
+        # convoluiton part
+        assert len(filter_shape) == 4, ("filter_shape has to be a 4-D tuple "
+                                        "ordered in this way: (# filters, "
+                                        "# input channels, # filter height, "
+                                        "# filter width)")
+        if not npy_rng:
+            npy_rng = numpy.random.RandomState(123)
+        assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
+        self.filter_shape = filter_shape
+        
+        if not init_w:
+            numparam_per_filter = numpy.prod(filter_shape[1:])
+            w = self._weight_initialization()
+            init_w = theano.shared(
+                value=w, name=self.__class__.__name__ + '_w', borrow=True)
+        self.w = init_w
+
+        if not init_b:
+            init_b = theano.shared(
+                value=numpy.zeros((filter_shape[0],), dtype=theano.config.floatX),
+                name=self.__class__.__name__ + '_b',
+                borrow=True
+            )
+        else:
+            assert init_b.get_value().shape == (filter_shape[0],)
+        self.b = init_b
+
+        # pooling part:
+        assert len(pool_size) == 2, ("pool_size should be a 2-D tuple in the "
+                                     "form (# rows, # cols)")
+        self.pool_size = pool_size
+        if not stride:
+            stride = pool_size
+        else:
+            if len(stride) != 2 or min(stride) <= 0:
+                raise ValueError(
+                    "stride should be a 2-D tuple in the form (# rows, # cols)"
+                    ". Each entry in stride should be strictly larger than 0.")
+        self.stride = stride
+        self.ignore_border = ignore_border
+        
+        self.n_in, self.varin = n_in, varin
+        if self.n_in != None:
+            self._init_complete()
+
+    def _init_complete(self):
+        assert self.n_in != None, "Need to have n_in attribute to execute."
+        assert len(self.n_in) == 4, (
+            "n_in is expected to be a 4-D tuple ordered in this way: (batch "
+            "size, # input channels, # input height, # input width)")
+        # filter_shape[1] has to be the same to n_in[1]
+        conv_out = (self.n_in[0], self.filter_shape[0],
+                    self.n_in[2] - self.filter_shape[2] + 1,
+                    self.n_in[3] - self.filter_shape[3] + 1)
+        if conv_out[2] == 0 or conv_out[3] == 0:
+            raise ValueError(
+                "Output dimension of convolution layer reaches 0 :\n" + \
+                self._print_str() + "\n"
+            )
+
+        # use a test method to decide the output dimension, because sometimes
+        # the output dimension behaves weirdly. Normally it should be:
+        # (max((patch - max(pool-stride, 0)), 1) + stride -1) / stride
+        tx = T.matrix().reshape((conv_out[2], conv_out[3]))
+        ty = downsample.max_pool_2d(
+            tx, ds=self.pool_size,
+            ignore_border=self.ignore_border, st=self.stride)
+
+        tf = theano.function([tx], ty)
+        out_dim = tf(
+            numpy.random.random((conv_out[2], conv_out[3])
+            ).astype(theano.config.floatX)
+        ).shape
+
+        n_out = (conv_out[0], conv_out[1], out_dim[0], out_dim[1])
+        if n_out[2] == 0 or n_out[3] == 0:
+            raise ValueError(
+                "Output dimension of pooling layer reaches 0 :\n" + \
+                self._print_str() + "\n"
+            )
+        
+        super(Conv2DPoolingReluLayer, self).__init__(self.n_in, n_out,
+                                                     varin=self.varin)
+        self.varin = self.varin.reshape(self.n_in)    
+        self.params = [self.w, self.b]
+
+    def _weight_initialization(self):
+        """
+        if there is no 0.1 multiplier, then the variance of each pre-hidden is
+        roughly 1.0, which is desired by the principle indicated by batch
+        normalization. Adding 0.1 to ensure the initial weights to be
+        sufficiently small, which is found to be more efficient in converging
+        during the first few epochs. 
+        """
+        numparam_per_filter = numpy.prod(self.filter_shape[1:])
+        w = numpy.asarray(self.npy_rng.uniform(
+            low = - 0.1 * numpy.sqrt(3. / numparam_per_filter),
+            high = 0.1 * numpy.sqrt(3. / numparam_per_filter),
+            size=self.filter_shape), dtype=theano.config.floatX)
+        return w
+
+    def fanin(self):
+        varconv = conv.conv2d(
+            input=self.varin, filters=self.w,
+            filter_shape=self.filter_shape, image_shape=self.n_in
+        ) + self.b.dimshuffle('x', 0, 'x', 'x')
+
+        self.varfanin = downsample.max_pool_2d(
+            input=varconv, ds=self.pool_size,
+            ignore_border=self.ignore_border, st=self.stride)
+        return self.varfanin
+
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return T.maximum(fanin, 0.)
+
+    def activ_prime(self):
+        raise NotImplementedError("Not implemented yet...")
+
+
+class BinaryConv2DPoolingReluLayer(Conv2DPoolingReluLayer):
+    def __init__(self, filter_shape,
+                 pool_size, stride=None, ignore_border=False,
+                 n_in=None, varin=None, mode='stochastic',
+                 init_w=None, init_b=None, npy_rng=None):
+        super(BinaryConv2DPoolingReluLayer, self).__init__(
+            filter_shape=filter_shape, pool_size=pool_size, stride=stride,
+            n_in=n_in, varin=varin,
+            init_w=init_w, init_b=init_b, npy_rng=npy_rng
+        )
+        self.srng = theano.sandbox.rng_mrg.MRG_RandomStreams(
+            self.npy_rng.randint(999999))
+        self.mode = mode
+    
+    def binarized_weight(self):
+        self.w0 = (
+            numpy.sqrt(3. / numpy.prod(self.filter_shape[1:])) / 2
+        ).astype(theano.config.floatX)
+        if self.mode == 'deterministic':
+            self.wb = T.switch(T.ge(self.w, 0), self.w0, -self.w0)
+
+        elif self.mode == 'stochastic':
+            # probability=hard_sigmoid(w/w0)
+            p = T.clip(((self.w / self.w0) + 1) / 2, 0, 1)
+            p_mask = T.cast(self.srng.binomial(n=1, p=p, size=T.shape(self.w)),
+                            theano.config.floatX)
+
+            # [0,1] -> -W0 or W0
+            self.wb = T.switch(p_mask, self.w0, -self.w0)
+
+        else:
+            raise ValueError("Parameter 'self.mode' has to be either "
+                             "'deterministic' or 'stochastic'")
+
+        return self.wb
+
+    def fanin(self):
+        self.varconv = T.nnet.conv.conv2d(
+            input=self.varin, filters=self.binarized_weight(),
+            filter_shape=self.filter_shape, image_shape=self.n_in
+        ) + self.b.dimshuffle('x', 0, 'x', 'x')
+
+        self.varfanin = downsample.max_pool_2d(
+            input=self.varconv, ds=self.pool_size,
+            ignore_border=self.ignore_border, st=self.stride)
+        return self.varfanin
+
+    def quantized_bprop(self, cost):
+        """
+        bprop for convolution layer equals:
+        
+        (
+            self.x.dimshuffle(1, 0, 2, 3)       (*) 
+            T.grad(cost, wrt=#convoutput).dimshuffle(1, 0, 2, 3)[:, :, ::-1, ::-1]
+        ).dimshuffle(1, 0, 2, 3)[:, :, ::-1, ::-1]
+
+        '(*)'stands for convolution.
+        Here we quantize (rep of previous layer) and leave the rest as it is.
+        """
+        # the lower 2**(integer power)
+        index_low = T.switch(self.varin > 0.,
+            T.floor(T.log2(self.varin)), T.floor(T.log2(-self.varin))
+        )
+        index_low = T.clip(index_low, -4, 3)
+        sign = T.switch(self.varin > 0., 1., -1.)
+        # the upper 2**(integer power) though not used explicitly.
+        # index_up = index_low + 1
+        # percentage of upper index.
+        p_up = sign * self.varin / 2**(index_low) - 1
+        index_random = index_low + self.srng.binomial(
+            n=1, p=p_up, size=T.shape(self.varin), dtype=theano.config.floatX)
+        quantized_rep = sign * 2**index_random
+        
+        error = T.grad(cost=cost, wrt=self.varconv)
+
+        self.dEdW = T.nnet.conv.conv2d(
+            input=quantized_rep.dimshuffle(1, 0, 2, 3),
+            filters=error.dimshuffle(1, 0, 2, 3)[:, :, ::-1, ::-1]
+        ).dimshuffle(1, 0, 2, 3)[:, :, ::-1, ::-1]
+
+
 class BinaryReluConv2DLayer(ReluConv2DLayer):
     def __init__(self, filter_shape, n_in=None, mode='stochastic',
                  varin=None, init_w=None, init_b=None, npy_rng=None):
@@ -1077,8 +1295,7 @@ class BinaryReluConv2DLayer(ReluConv2DLayer):
         p_up = sign * self.varin / 2**(index_low) - 1
         index_random = index_low + self.srng.binomial(
             n=1, p=p_up, size=T.shape(self.varin), dtype=theano.config.floatX)
-        # quantized_rep = sign * 2**index_random
-        quantized_rep = self.varin
+        quantized_rep = sign * 2**index_random
         
         error = T.grad(cost=cost, wrt=self.varfanin)
 
@@ -1097,7 +1314,7 @@ class PReluConv2DLayer(Conv2DLayer):
         )
         self.lk = theano.shared(
             value=numpy.float32(0.).astype(theano.config.floatX),
-            name='leak_rate'
+            name=self.__class__.__name__ + '_leak_rate'
         )
 
     def _init_complete(self):
@@ -1194,15 +1411,19 @@ class PoolingLayer(Layer):
         super(PoolingLayer, self).__init__(self.n_in, n_out, varin=self.varin)
         self.varin = self.varin.reshape(self.n_in)
 
-    def output(self):
+    def fanin(self):
         raise NotImplementedError("Must be implemented by subclass.")
+    
+    def output(self, fanin=None):
+        if fanin == None:   fanin = self.fanin()
+        return fanin
 
     def activ_prime(self):
         raise NotImplementedError("Not implemented yet...")
 
 
 class MaxPoolingLayer(PoolingLayer):
-    def output(self):
+    def fanin(self):
         return downsample.max_pool_2d(
             input=self.varin, ds=self.pool_size,
             ignore_border=self.ignore_border, st=self.stride

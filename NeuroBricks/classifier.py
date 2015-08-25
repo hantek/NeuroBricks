@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 from model import Model
 from layer import SigmoidLayer
 
+import pdb
+
 
 class Classifier(Model):
     def __init__(self, n_in, n_out, varin=None, vartruth=None):
@@ -184,8 +186,7 @@ class BinaryLogisticRegression(LogisticRegression):
         p_up = sign * self.varin / 2**(index_low) - 1
         index_random = index_low + self.srng.binomial(
             n=1, p=p_up, size=T.shape(self.varin), dtype=theano.config.floatX)
-        # quantized_rep = sign * 2**index_random
-        quantized_rep = self.varin
+        quantized_rep = sign * 2**index_random
 
         error = T.grad(cost=cost, wrt=self.varfanin)
 
