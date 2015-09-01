@@ -1308,13 +1308,13 @@ class BinaryReluConv2DLayer(ReluConv2DLayer):
 class PReluConv2DLayer(Conv2DLayer):
     def __init__(self, filter_shape, n_in=None, varin=None,
                  init_w=None, init_b=None, npy_rng=None):
-        super(PReluConv2DLayer, self).__init__(
-            filter_shape, n_in=n_in, varin=varin, init_w=init_w,
-            init_b=init_b, npy_rng=npy_rng
-        )
         self.lk = theano.shared(
             value=numpy.float32(0.).astype(theano.config.floatX),
             name=self.__class__.__name__ + '_leak_rate'
+        )
+        super(PReluConv2DLayer, self).__init__(
+            filter_shape, n_in=n_in, varin=varin, init_w=init_w,
+            init_b=init_b, npy_rng=npy_rng
         )
 
     def _init_complete(self):
