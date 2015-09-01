@@ -872,7 +872,7 @@ class GatedLinearLayer(Layer):
 
 
 class Conv2DLayer(Layer):
-    def __init__(self, filter_shape, n_in=None, varin=None,
+    def __init__(self, n_in, filter_shape, n_out=None, varin=None,
                  init_w=None, init_b=None, npy_rng=None):
         """
         This is a base class for all 2-D convolutional classes using various of
@@ -915,7 +915,7 @@ class Conv2DLayer(Layer):
         assert isinstance(npy_rng, numpy.random.RandomState)
         self.npy_rng = npy_rng
         self.filter_shape = filter_shape
-        
+
         if not init_w:
             numparam_per_filter = numpy.prod(filter_shape[1:])
             w = self._weight_initialization()
@@ -937,7 +937,7 @@ class Conv2DLayer(Layer):
         else:
             assert init_b.get_value().shape == (filter_shape[0],)
         self.b = init_b
-        
+
         self.n_in, self.varin = n_in, varin
         if self.n_in != None:
             self._init_complete()
@@ -1306,21 +1306,21 @@ class BinaryReluConv2DLayer(ReluConv2DLayer):
 
 
 class PReluConv2DLayer(Conv2DLayer):
-    def __init__(self, filter_shape, n_in=None, varin=None,
+    def __init__(self, n_in, filter_shape, n_out=None, varin=None,
                  init_w=None, init_b=None, npy_rng=None):
         self.lk = theano.shared(
             value=numpy.float32(0.).astype(theano.config.floatX),
             name=self.__class__.__name__ + '_leak_rate'
         )
         super(PReluConv2DLayer, self).__init__(
-            filter_shape, n_in=n_in, varin=varin, init_w=init_w,
-            init_b=init_b, npy_rng=npy_rng
+            n_in, filter_shape, n_out=None, varin=None, init_w=None,
+            init_b=None, npy_rng=None
         )
 
     def _init_complete(self):
         super(PReluConv2DLayer, self)._init_complete()
         self.params.append(self.lk)
-    
+
     def _weight_initialization(self):
         numparam_per_filter = numpy.prod(self.filter_shape[1:])
         w = numpy.asarray(self.npy_rng.uniform(
