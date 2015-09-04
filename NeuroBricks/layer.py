@@ -872,7 +872,7 @@ class GatedLinearLayer(Layer):
 
 
 class Conv2DLayer(Layer):
-    def __init__(self, n_in, filter_shape, n_out=None, varin=None,
+    def __init__(self, filter_shape, n_in=None, varin=None,
                  init_w=None, init_b=None, npy_rng=None):
         """
         This is a base class for all 2-D convolutional classes using various of
@@ -887,10 +887,6 @@ class Conv2DLayer(Layer):
         The boring thing is that we need to determine batch size, which belongs
         to training and has nothing to do with the model itself, while building
         the model. 
-
-        n_out : tuple
-        Specifies the dimension of output. Should be consistant to the
-        convolution of filter_shape and n_in.
 
         filter_shape : tuple
         Specifies the filter shape. The dimension is in the order bc01, i.e.
@@ -951,7 +947,7 @@ class Conv2DLayer(Layer):
         self.n_out = (self.n_in[0], self.filter_shape[0],
                       self.n_in[2] - self.filter_shape[2] + 1,
                       self.n_in[3] - self.filter_shape[3] + 1)
-        if self.n_out[2] == 0 or self.n_out[3] == 0:
+        if self.n_out[2] <= 0 or self.n_out[3] <= 0:
             raise ValueError(
                 "Output dimension of convolution layer reaches 0 :\n" + \
                 self._print_str() + "\n"
@@ -1018,10 +1014,9 @@ class ReluConv2DLayer(Conv2DLayer):
 
 
 class Conv2DPoolingReluLayer(Layer):
-    def __init__(self, filter_shape,
+    def __init__(self, n_in, filter_shape,
                  pool_size, stride=None, ignore_border=False,
-                 n_in=None, varin=None,
-                 init_w=None, init_b=None, npy_rng=None):
+                 varin=None, init_w=None, init_b=None, npy_rng=None):
         """
         Order of operation: 
             conv2D -> bias -> max pooling -> ReLU
@@ -1151,9 +1146,8 @@ class Conv2DPoolingReluLayer(Layer):
 
 
 class BinaryConv2DPoolingReluLayer(Conv2DPoolingReluLayer):
-    def __init__(self, filter_shape,
-                 pool_size, stride=None, ignore_border=False,
-                 n_in=None, varin=None, mode='stochastic',
+    def __init__(self, n_in, filter_shape, pool_size, stride=None,
+                 ignore_border=False, varin=None, mode='stochastic',
                  init_w=None, init_b=None, npy_rng=None):
         super(BinaryConv2DPoolingReluLayer, self).__init__(
             filter_shape=filter_shape, pool_size=pool_size, stride=stride,
@@ -1232,7 +1226,7 @@ class BinaryConv2DPoolingReluLayer(Conv2DPoolingReluLayer):
 
 
 class BinaryReluConv2DLayer(ReluConv2DLayer):
-    def __init__(self, filter_shape, n_in=None, mode='stochastic',
+    def __init__(self, n_in, filter_shape, mode='stochastic',
                  varin=None, init_w=None, init_b=None, npy_rng=None):
         super(BinaryReluConv2DLayer, self).__init__(
             filter_shape=filter_shape, n_in=n_in, varin=varin,
@@ -1306,15 +1300,15 @@ class BinaryReluConv2DLayer(ReluConv2DLayer):
 
 
 class PReluConv2DLayer(Conv2DLayer):
-    def __init__(self, n_in, filter_shape, n_out=None, varin=None,
+    def __init__(self, filter_shape, n_in=None, varin=None,
                  init_w=None, init_b=None, npy_rng=None):
         self.lk = theano.shared(
             value=numpy.float32(0.).astype(theano.config.floatX),
             name=self.__class__.__name__ + '_leak_rate'
         )
         super(PReluConv2DLayer, self).__init__(
-            n_in, filter_shape, n_out=None, varin=None, init_w=None,
-            init_b=None, npy_rng=None
+            filter_shape, n_in=n_in, varin=varin, init_w=init_w,
+            init_b=init_b, npy_rng=npy_rng
         )
 
     def _init_complete(self):
@@ -1408,7 +1402,8 @@ class PoolingLayer(Layer):
                 self._print_str() + "\n"
             )
         
-        super(PoolingLayer, self).__init__(self.n_in, n_out, varin=self.varin)
+        super(PoolingLayer, self).__init__(n_in=self.n_in, n_out=n_out,
+                                           varin=self.varin)
         self.varin = self.varin.reshape(self.n_in)
 
     def fanin(self):
