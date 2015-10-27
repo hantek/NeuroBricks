@@ -9,3 +9,9 @@ Training algorithms deal with those generaters. So at high level it is opaque ho
 Layers can be splitted into differentiable and non-differentiable ones. For those non-differentiable ones, they don't allow back-prop to pass through them. 
 
 For those types of layer which are for preprocessing, it should allow "instantiate-and-fit" procedure. i.e., it shoudld allow defining the layer in a StackedLayer object, and then fit it according to the provided data. In this way we have a general form of doing preprocessing and training.
+
+ - 3 -
+3 hierarchies for different dataset sizes:
+ - small datasets: load the whole dataset in GPU, and process in GPU
+ - middle sized datasets: load the whole dataset in CPU, load in parts into GPU
+ - large datasets: store on disk, (asynchronously) load in parts into GPU.

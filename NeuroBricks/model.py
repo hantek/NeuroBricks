@@ -201,6 +201,7 @@ class BasicAutoencoder(AutoEncoder):
         if not npy_rng:
             npy_rng = numpy.random.RandomState(123)
         assert isinstance(npy_rng, numpy.random.RandomState)
+        self.npy_rng = npy_rng
 
         if not init_w:
             w = self._weight_initialization()
@@ -251,7 +252,7 @@ class BasicAutoencoder(AutoEncoder):
             self.params_private = self.params + [self.wT, self.bT]
 
     def _weight_initialization(self):
-        w = numpy.asarray(npy_rng.uniform(
+        w = numpy.asarray(self.npy_rng.uniform(
             low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
             high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
             size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
@@ -321,7 +322,7 @@ class LinearAutoencoder(BasicAutoencoder):
 class ReluAutoencoder(BasicAutoencoder):
     def _weight_initialization(self):
         # TODO: Adjust it.
-        w = numpy.asarray(npy_rng.uniform(
+        w = numpy.asarray(self.npy_rng.uniform(
             low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
             high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
             size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
@@ -337,7 +338,7 @@ class ReluAutoencoder(BasicAutoencoder):
 class AbsAutoencoder(BasicAutoencoder):
     def _weight_initialization(self):
         # TODO: Adjust it.
-        w = numpy.asarray(npy_rng.uniform(
+        w = numpy.asarray(self.npy_rng.uniform(
             low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
             high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
             size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
@@ -370,7 +371,7 @@ class ZerobiasAutoencoder(BasicAutoencoder):
 
     def _weight_initialization(self):
         # TODO: Adjust it.
-        w = numpy.asarray(npy_rng.uniform(
+        w = numpy.asarray(self.npy_rng.uniform(
             low=-4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
             high=4 * numpy.sqrt(6. / (self.n_in + self.n_hid)),
             size=(self.n_in, self.n_hid)), dtype=theano.config.floatX)
