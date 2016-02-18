@@ -80,6 +80,52 @@ class MNIST(object):
         return (digit_data, digit_truth) 
 
 
+class ISOLET(object):
+    """
+    Isolet dataset from UCI: https://archive.ics.uci.edu/ml/datasets/ISOLET
+    The initila data format is in C4.5 format. This class converts it to
+    numpy ndarrays.
+
+    """
+
+    def __init__(self, folderpath="/data/lisa/data/isolet"):
+        self.folderpath = folderpath
+
+    def convert(self, filepath, numsamples, randomstate):
+        data = numpy.zeros((numsamples, 617), dtype='float32')
+        truth = numpy.zeros((numsamples, ), dtype='int')
+
+        datafile = open(filepath, 'r')
+        line = datafile.readline()
+        i = 0
+        while line != '':
+            listline = line[:-1].split(", ")  # strip off the last character "\n"
+            data[i] = numpy.asarray([float(x) for x in listline[:-1]]
+                ).astype('float32')
+            truth[i] = int(float(listline[-1]))
+            line = datafile.readline()
+            i += 1
+        datafile.close()
+
+        rng = numpy.random.RandomState(randomstate)
+        order = rng.permutation(numsamples)
+        data = data[order]
+        truth = truth[order]
+        return data, truth
+
+    def get_train_set(self):
+        return self.convert(
+            os.path.join(self.folderpath, 'isolet1+2+3+4.data'),
+            6238,
+            623874)
+
+    def get_test_set(self):
+        return self.convert(
+            os.path.join(self.folderpath, 'isolet5.data'),
+            1559,
+            433895)
+
+
 class CIFAR10(object):
     def __init__(self,
                  folderpath="/data/lisa/data/cifar10/cifar-10-batches-py"):
