@@ -493,7 +493,7 @@ class StackedLayer(Layer):
                     print layer_string
             previous_layer_string = layer_string
         if repeat_count != 0:
-            print " " * (num_space - 5), "same x %d" % (repeat_count + 1)
+            print " " * (num_space - 5), "(+ same x %d)" % (repeat_count)
         print "-" * 50
 
 

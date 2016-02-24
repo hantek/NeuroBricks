@@ -110,7 +110,7 @@ class ISOLET(object):
         rng = numpy.random.RandomState(randomstate)
         order = rng.permutation(numsamples)
         data = data[order]
-        truth = truth[order]
+        truth = truth[order] - 1
         return data, truth
 
     def get_train_set(self):
