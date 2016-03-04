@@ -8,7 +8,7 @@ import numpy
 import theano
 import theano.tensor as T
 from theano.tensor.nnet import conv
-from theano.tensor.signal import downsample
+from theano.tensor.signal import pool
 
 import matplotlib
 # matplotlib.use('Agg')
@@ -1089,7 +1089,7 @@ class Conv2DPoolingReluLayer(Layer):
         # the output dimension behaves weirdly. Normally it should be:
         # (max((patch - max(pool-stride, 0)), 1) + stride -1) / stride
         tx = T.matrix().reshape((conv_out[2], conv_out[3]))
-        ty = downsample.max_pool_2d(
+        ty = pool.pool_2d(
             tx, ds=self.pool_size,
             ignore_border=self.ignore_border, st=self.stride)
 
@@ -1132,7 +1132,7 @@ class Conv2DPoolingReluLayer(Layer):
             filter_shape=self.filter_shape, image_shape=self.n_in
         ) + self.b.dimshuffle('x', 0, 'x', 'x')
 
-        self.varfanin = downsample.max_pool_2d(
+        self.varfanin = pool.pool_2d(
             input=varconv, ds=self.pool_size,
             ignore_border=self.ignore_border, st=self.stride)
         return self.varfanin
@@ -1186,7 +1186,7 @@ class BinaryConv2DPoolingReluLayer(Conv2DPoolingReluLayer):
             filter_shape=self.filter_shape, image_shape=self.n_in
         ) + self.b.dimshuffle('x', 0, 'x', 'x')
 
-        self.varfanin = downsample.max_pool_2d(
+        self.varfanin = pool.pool_2d(
             input=self.varconv, ds=self.pool_size,
             ignore_border=self.ignore_border, st=self.stride)
         return self.varfanin
@@ -1385,7 +1385,7 @@ class PoolingLayer(Layer):
         # the output dimension behaves weirdly. Normally it should be:
         # (max((patch - max(pool-stride, 0)), 1) + stride -1) / stride
         tx = T.matrix().reshape((self.n_in[2], self.n_in[3]))
-        ty = downsample.max_pool_2d(
+        ty = pool.pool_2d(
             tx, ds=self.pool_size,
             ignore_border=self.ignore_border, st=self.stride)
 
@@ -1419,7 +1419,7 @@ class PoolingLayer(Layer):
 
 class MaxPoolingLayer(PoolingLayer):
     def fanin(self):
-        return downsample.max_pool_2d(
+        return pool.pool_2d(
             input=self.varin, ds=self.pool_size,
             ignore_border=self.ignore_border, st=self.stride
         )
