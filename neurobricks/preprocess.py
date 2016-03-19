@@ -101,7 +101,7 @@ class PCA(object):
         unexpected vector.
         """
         if verbose:
-            print "Centralizing data..."
+            print "Centralizing data... ",
         data_variable = T.matrix('data_variable')
         np_ncases = numpy.array([ncases]).astype(theano.config.floatX)
         fun_partmean = theano.function(
@@ -115,7 +115,7 @@ class PCA(object):
         
         # compute convariance matrix
         if verbose:
-            print "Computing covariance..."
+            print "Computing covariance... ",
         covmat = theano.shared(
             value=numpy.zeros((self.ndim, self.ndim),
                               dtype=theano.config.floatX),
