@@ -11,7 +11,7 @@ from theano.tensor.nnet import conv
 from theano.tensor.signal import pool
 
 import matplotlib
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import pdb
